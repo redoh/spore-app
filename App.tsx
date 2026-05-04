@@ -7,6 +7,7 @@ import { Platform, StyleSheet, Text, View } from 'react-native';
 import MainMenu from './src/screens/MainMenu';
 import CellStage from './src/screens/CellStage';
 import GameOver from './src/screens/GameOver';
+import ErrorBoundary from './src/components/ErrorBoundary';
 import { useGame } from './src/game/store';
 import { theme } from './src/theme';
 
@@ -75,13 +76,15 @@ export default function App() {
       <GestureHandlerRootView style={styles.root}>
         <SafeAreaProvider>
           <View style={styles.root}>
-            {status === 'playing' || status === 'evolving' ? (
-              <CellStage />
-            ) : status === 'gameover' ? (
-              <GameOver />
-            ) : (
-              <MainMenu />
-            )}
+            <ErrorBoundary>
+              {status === 'playing' || status === 'evolving' ? (
+                <CellStage />
+              ) : status === 'gameover' ? (
+                <GameOver />
+              ) : (
+                <MainMenu />
+              )}
+            </ErrorBoundary>
           </View>
           <StatusBar style="light" />
         </SafeAreaProvider>
