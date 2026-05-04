@@ -14,16 +14,22 @@ import * as Haptics from 'expo-haptics';
 import { theme } from '../theme';
 import { useGame } from '../game/store';
 import { applyParts, createWorld, stepWorld } from '../game/world';
-import type { World } from '../game/types';
+import type { Cell, PartId, World } from '../game/types';
 import HUD from '../components/HUD';
 import EvolveModal from '../components/EvolveModal';
 
 const FIXED_DT = 1 / 60;
 
+// Player must be this big AND have this many parts to be allowed to crawl
+// onto land into the Creature Stage.
+const LAND_RADIUS_THRESHOLD = 30;
+const LAND_PARTS_THRESHOLD = 3;
+
 export default function CellStage() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const setStatus = useGame((s) => s.setStatus);
+  const setStage = useGame((s) => s.setStage);
   const reportRunEnd = useGame((s) => s.reportRunEnd);
   const addDna = useGame((s) => s.addDna);
   const status = useGame((s) => s.status);
@@ -31,7 +37,7 @@ export default function CellStage() {
   const worldRef = useRef<World>(createWorld());
   const inputRef = useRef({ x: 0, y: 0 });
   const lastTouchRef = useRef<{ x: number; y: number } | null>(null);
-  const [tick, setTick] = useState(0);
+  const [, setTick] = useState(0);
   const [evolveOpen, setEvolveOpen] = useState(false);
 
   // Game loop
@@ -44,8 +50,6 @@ export default function CellStage() {
       last = t;
       acc += dt;
       const w = worldRef.current;
-
-      // Pause sim while modal open or status not playing
       const paused = evolveOpen || status !== 'playing';
       if (!paused) {
         while (acc >= FIXED_DT) {
@@ -80,7 +84,6 @@ export default function CellStage() {
 
   const w = worldRef.current;
 
-  // Camera offset (clamped so we don't show beyond world bounds)
   const camX = Math.max(0, Math.min(w.width - width, w.player.pos.x - width / 2));
   const camY = Math.max(
     0,
@@ -115,8 +118,19 @@ export default function CellStage() {
     lastTouchRef.current = null;
   };
 
-  // Simple visual bg layer
   const bg = useMemo(() => theme.colors.bgDeep, []);
+
+  const canLand =
+    w.player.radius >= LAND_RADIUS_THRESHOLD &&
+    w.player.parts.length >= LAND_PARTS_THRESHOLD;
+
+  const goCreature = () => {
+    reportRunEnd(w.player.radius);
+    setStage('creature');
+    try {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {}
+  };
 
   return (
     <View
@@ -129,10 +143,8 @@ export default function CellStage() {
       onResponderTerminate={onTouchEnd}
     >
       <Canvas style={{ flex: 1, width, height, backgroundColor: bg }}>
-        {/* Grid dots for parallax feel */}
         {gridDots(w.width, w.height, camX, camY, width, height)}
 
-        {/* Food (cull off-screen for perf) */}
         {w.food.map((f) => {
           const x = f.pos.x - camX;
           const y = f.pos.y - camY;
@@ -149,7 +161,6 @@ export default function CellStage() {
           );
         })}
 
-        {/* AI cells */}
         {w.cells.map((c) => {
           const x = c.pos.x - camX;
           const y = c.pos.y - camY;
@@ -182,28 +193,8 @@ export default function CellStage() {
           );
         })}
 
-        {/* Player */}
-        <Circle
-          cx={w.player.pos.x - camX}
-          cy={w.player.pos.y - camY}
-          r={w.player.radius + 6}
-          color={theme.colors.player}
-          opacity={0.2}
-        />
-        <Circle
-          cx={w.player.pos.x - camX}
-          cy={w.player.pos.y - camY}
-          r={w.player.radius}
-          color={theme.colors.player}
-        />
-        <Circle
-          cx={w.player.pos.x - camX}
-          cy={w.player.pos.y - camY}
-          r={Math.max(3, w.player.radius * 0.5)}
-          color={theme.colors.playerInner}
-        />
+        {renderPlayer(w.player, camX, camY)}
 
-        {/* Particles */}
         {w.particles.map((p) => (
           <Circle
             key={'p' + p.id}
@@ -216,14 +207,6 @@ export default function CellStage() {
         ))}
       </Canvas>
 
-      <View style={styles.debug} pointerEvents="none">
-        <Text style={styles.debugText}>
-          {width}x{height} · f{tick} · cells {w.cells.length} · food{' '}
-          {w.food.length} · p({w.player.pos.x.toFixed(0)},
-          {w.player.pos.y.toFixed(0)}) cam({camX.toFixed(0)},{camY.toFixed(0)})
-        </Text>
-      </View>
-
       <HUD
         hp={w.player.hp}
         maxHp={w.player.maxHp}
@@ -231,10 +214,14 @@ export default function CellStage() {
         diet={w.player.diet}
       />
 
-      <EvolveButton
-        bottom={insets.bottom + 24}
-        onPress={() => setEvolveOpen(true)}
-      />
+      {canLand ? (
+        <LandButton bottom={insets.bottom + 24} onPress={goCreature} />
+      ) : (
+        <EvolveButton
+          bottom={insets.bottom + 24}
+          onPress={() => setEvolveOpen(true)}
+        />
+      )}
 
       <PauseButton
         top={insets.top + 14}
@@ -257,6 +244,159 @@ export default function CellStage() {
   );
 }
 
+function renderPlayer(player: Cell, camX: number, camY: number) {
+  const px = player.pos.x - camX;
+  const py = player.pos.y - camY;
+  const pr = player.radius;
+  const vlen = Math.hypot(player.vel.x, player.vel.y);
+  const dir =
+    vlen > 5
+      ? { x: player.vel.x / vlen, y: player.vel.y / vlen }
+      : { x: 0, y: -1 };
+  const parts = new Set<PartId>(player.parts);
+  const els: React.ReactElement[] = [];
+
+  // outer aura
+  els.push(
+    <Circle
+      key="halo"
+      cx={px}
+      cy={py}
+      r={pr + 8}
+      color={theme.colors.player}
+      opacity={0.18}
+    />,
+  );
+  // shell
+  if (parts.has('shell')) {
+    els.push(
+      <Circle
+        key="shell-outer"
+        cx={px}
+        cy={py}
+        r={pr + 4}
+        color="#a8f5e3"
+        opacity={0.55}
+      />,
+    );
+    els.push(
+      <Circle
+        key="shell-mid"
+        cx={px}
+        cy={py}
+        r={pr + 2}
+        color={theme.colors.bgDeep}
+        opacity={0.4}
+      />,
+    );
+  }
+  // jet trail (rendered behind body)
+  if (parts.has('jet')) {
+    for (let i = 0; i < 4; i++) {
+      const off = pr + (i + 1) * pr * 0.45;
+      els.push(
+        <Circle
+          key={`jet-${i}`}
+          cx={px - dir.x * off}
+          cy={py - dir.y * off}
+          r={Math.max(2, (pr * 0.34) / (i + 1))}
+          color={theme.colors.accent}
+          opacity={0.55 / (i + 1)}
+        />,
+      );
+    }
+  }
+  // body
+  els.push(
+    <Circle key="body" cx={px} cy={py} r={pr} color={theme.colors.player} />,
+  );
+  // nucleus
+  els.push(
+    <Circle
+      key="nucleus"
+      cx={px}
+      cy={py}
+      r={Math.max(3, pr * 0.5)}
+      color={theme.colors.playerInner}
+    />,
+  );
+  // spikes
+  if (parts.has('spike')) {
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      els.push(
+        <Circle
+          key={`spike-${i}`}
+          cx={px + Math.cos(a) * pr * 1.2}
+          cy={py + Math.sin(a) * pr * 1.2}
+          r={Math.max(2, pr * 0.18)}
+          color={theme.colors.danger}
+        />,
+      );
+    }
+  }
+  // filter cilia
+  if (parts.has('filter')) {
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      els.push(
+        <Circle
+          key={`filter-${i}`}
+          cx={px + Math.cos(a) * pr * 1.08}
+          cy={py + Math.sin(a) * pr * 1.08}
+          r={Math.max(1.4, pr * 0.09)}
+          color={theme.colors.plant}
+          opacity={0.85}
+        />,
+      );
+    }
+  }
+  // jaw
+  if (parts.has('jaw')) {
+    els.push(
+      <Circle
+        key="jaw-shadow"
+        cx={px + dir.x * pr * 0.65}
+        cy={py + dir.y * pr * 0.65}
+        r={pr * 0.36}
+        color="#170611"
+        opacity={0.85}
+      />,
+    );
+    els.push(
+      <Circle
+        key="jaw-fang"
+        cx={px + dir.x * pr * 0.85}
+        cy={py + dir.y * pr * 0.85}
+        r={pr * 0.18}
+        color={theme.colors.danger}
+      />,
+    );
+  }
+  // eye
+  if (parts.has('eye')) {
+    els.push(
+      <Circle
+        key="eye-sclera"
+        cx={px + dir.x * pr * 0.42}
+        cy={py + dir.y * pr * 0.42}
+        r={pr * 0.34}
+        color="#f0fff8"
+      />,
+    );
+    els.push(
+      <Circle
+        key="eye-pupil"
+        cx={px + dir.x * pr * 0.52}
+        cy={py + dir.y * pr * 0.52}
+        r={pr * 0.18}
+        color="#0a0410"
+      />,
+    );
+  }
+  return els;
+}
+
 function gridDots(
   worldW: number,
   worldH: number,
@@ -267,7 +407,6 @@ function gridDots(
 ) {
   const step = 120;
   const dots = [];
-  // Only iterate within visible viewport
   const startX = Math.max(step / 2, Math.floor(camX / step) * step + step / 2);
   const endX = Math.min(worldW, camX + vw + step);
   const startY = Math.max(step / 2, Math.floor(camY / step) * step + step / 2);
@@ -309,6 +448,25 @@ function EvolveButton({
   );
 }
 
+function LandButton({
+  onPress,
+  bottom,
+}: {
+  onPress: () => void;
+  bottom: number;
+}) {
+  return (
+    <TouchableOpacity
+      activeOpacity={0.85}
+      onPress={onPress}
+      style={[styles.landBtn, { bottom }]}
+    >
+      <Text style={styles.landTxt}>KARAYA ÇIK</Text>
+      <Text style={styles.landSub}>Yaratık Evresine geç</Text>
+    </TouchableOpacity>
+  );
+}
+
 function PauseButton({
   onPress,
   top,
@@ -329,21 +487,6 @@ function PauseButton({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.colors.bgDeep },
-  debug: {
-    position: 'absolute',
-    bottom: 90,
-    left: 8,
-    right: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: 'rgba(255,255,0,0.18)',
-    borderRadius: 6,
-  },
-  debugText: {
-    color: theme.colors.warning,
-    fontSize: 10,
-    fontFamily: 'monospace',
-  },
   evolveBtn: {
     position: 'absolute',
     alignSelf: 'center',
@@ -368,6 +511,31 @@ const styles = StyleSheet.create({
   evolveDna: {
     color: theme.colors.text,
     fontSize: 12,
+    marginTop: 2,
+  },
+  landBtn: {
+    position: 'absolute',
+    alignSelf: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 34,
+    borderRadius: 32,
+    backgroundColor: theme.colors.accent,
+    alignItems: 'center',
+    shadowColor: theme.colors.accent,
+    shadowOpacity: 0.7,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  landTxt: {
+    color: theme.colors.bgDeep,
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 3,
+  },
+  landSub: {
+    color: theme.colors.bgDeep,
+    fontSize: 11,
+    opacity: 0.7,
     marginTop: 2,
   },
   pauseBtn: {

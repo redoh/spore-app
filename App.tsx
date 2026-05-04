@@ -6,6 +6,7 @@ import { StyleSheet, View } from 'react-native';
 
 import MainMenu from './src/screens/MainMenu';
 import CellStage from './src/screens/CellStage';
+import CreatureStage from './src/screens/CreatureStage';
 import GameOver from './src/screens/GameOver';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import { useGame } from './src/game/store';
@@ -13,20 +14,19 @@ import { theme } from './src/theme';
 
 export default function App() {
   const status = useGame((s) => s.status);
+  const stage = useGame((s) => s.stage);
+
+  let screen: React.ReactNode;
+  if (status === 'gameover') screen = <GameOver />;
+  else if (status === 'menu') screen = <MainMenu />;
+  else if (stage === 'creature') screen = <CreatureStage />;
+  else screen = <CellStage />;
 
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
         <View style={styles.root}>
-          <ErrorBoundary>
-            {status === 'playing' || status === 'evolving' ? (
-              <CellStage />
-            ) : status === 'gameover' ? (
-              <GameOver />
-            ) : (
-              <MainMenu />
-            )}
-          </ErrorBoundary>
+          <ErrorBoundary>{screen}</ErrorBoundary>
         </View>
         <StatusBar style="light" />
       </SafeAreaProvider>
