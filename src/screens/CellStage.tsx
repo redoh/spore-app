@@ -30,7 +30,9 @@ export default function CellStage() {
   const insets = useSafeAreaInsets();
   const setStatus = useGame((s) => s.setStatus);
   const setStage = useGame((s) => s.setStage);
+  const setCarryOver = useGame((s) => s.setCarryOver);
   const reportRunEnd = useGame((s) => s.reportRunEnd);
+  const reportStageReached = useGame((s) => s.reportStageReached);
   const addDna = useGame((s) => s.addDna);
   const status = useGame((s) => s.status);
 
@@ -126,6 +128,8 @@ export default function CellStage() {
 
   const goCreature = () => {
     reportRunEnd(w.player.radius);
+    reportStageReached('creature');
+    setCarryOver({ parts: [...w.player.parts], radius: w.player.radius });
     setStage('creature');
     try {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

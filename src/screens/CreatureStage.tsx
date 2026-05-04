@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  GestureResponderEvent,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -8,298 +9,716 @@ import {
 } from 'react-native';
 import { Canvas, Circle } from '@shopify/react-native-skia';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
 
 import { theme } from '../theme';
 import { useGame } from '../game/store';
+import { applyParts, createWorld, stepWorld } from '../game/world';
+import type { Cell, PartId, World } from '../game/types';
+import HUD from '../components/HUD';
+import EvolveModal from '../components/EvolveModal';
+
+const FIXED_DT = 1 / 60;
+
+// Tribal stage threshold — bigger creature with more parts
+const TRIBAL_RADIUS_THRESHOLD = 38;
+const TRIBAL_PARTS_THRESHOLD = 4;
+
+// Earth palette for creature stage
+const PALETTE = {
+  sky: '#1a2238',
+  ground: '#3a2a16',
+  groundDark: '#2a1d0e',
+  grass: '#4f7a3e',
+  fruit: '#e8634a',
+  rock: '#3a3d52',
+  rockShade: '#1f2238',
+  creatureBody: '#6cf0d3',
+  creatureBelly: '#3da291',
+  creatureLeg: '#2c8a76',
+};
 
 export default function CreatureStage() {
-  const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const setStatus = useGame((s) => s.setStatus);
   const setStage = useGame((s) => s.setStage);
-  const totalDna = useGame((s) => s.totalDna);
+  const setCarryOver = useGame((s) => s.setCarryOver);
+  const reportRunEnd = useGame((s) => s.reportRunEnd);
+  const reportStageReached = useGame((s) => s.reportStageReached);
+  const addDna = useGame((s) => s.addDna);
+  const status = useGame((s) => s.status);
+  const carryOver = useGame((s) => s.carryOver);
 
+  // Build world fresh on mount, seeded from cell-stage carry-over (if any).
+  // Creature stage is bigger and more dangerous than cell.
+  const worldRef = useRef<World>(
+    createWorld({
+      startRadius: Math.max(20, (carryOver?.radius ?? 22) * 0.85),
+      startHp: 90,
+      startParts: carryOver?.parts ?? [],
+      maxFood: 70,
+      maxCells: 18,
+      plantBias: 0.55,
+    }),
+  );
+  const inputRef = useRef({ x: 0, y: 0 });
+  const lastTouchRef = useRef<{ x: number; y: number } | null>(null);
   const [tick, setTick] = useState(0);
+  const [evolveOpen, setEvolveOpen] = useState(false);
+
+  // Apply carry-over parts on mount so stats reflect inherited evolution.
+  useEffect(() => {
+    if (carryOver?.parts?.length) {
+      applyParts(worldRef.current.player, carryOver.parts);
+    }
+    // We intentionally only do this once (mount).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Game loop
   useEffect(() => {
     let raf = 0;
-    const loop = () => {
-      setTick((t) => (t + 1) % 1_000_000);
+    let last = performance.now();
+    let acc = 0;
+    const loop = (t: number) => {
+      const dt = (t - last) / 1000;
+      last = t;
+      acc += dt;
+      const w = worldRef.current;
+      const paused = evolveOpen || status !== 'playing';
+      if (!paused) {
+        while (acc >= FIXED_DT) {
+          const r = stepWorld(w, { move: inputRef.current }, FIXED_DT);
+          acc -= FIXED_DT;
+          if (r.dnaGained > 0) addDna(r.dnaGained);
+          if (r.damageTaken > 4) {
+            try {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            } catch {}
+          }
+          if (r.died) {
+            reportRunEnd(w.player.radius);
+            setStatus('gameover');
+            try {
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Warning,
+              );
+            } catch {}
+            break;
+          }
+        }
+      } else {
+        acc = 0;
+      }
+      setTick((x) => (x + 1) % 1_000_000);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [addDna, reportRunEnd, setStatus, status, evolveOpen]);
 
-  // Slow drifting horizon decoration
-  const decor = useMemo(() => makeDecor(width, height), [width, height]);
-  const t = tick / 60; // seconds approx
-  const cx = width / 2;
-  const groundY = height * 0.78;
+  const w = worldRef.current;
+  const t = tick / 60;
+
+  const camX = Math.max(0, Math.min(w.width - width, w.player.pos.x - width / 2));
+  const camY = Math.max(
+    0,
+    Math.min(w.height - height, w.player.pos.y - height / 2),
+  );
+
+  const onTouchStart = (e: GestureResponderEvent) => {
+    const tt = e.nativeEvent.touches[0];
+    lastTouchRef.current = { x: tt.pageX, y: tt.pageY };
+    inputRef.current = { x: 0, y: 0 };
+  };
+  const onTouchMove = (e: GestureResponderEvent) => {
+    const tt = e.nativeEvent.touches[0];
+    if (!lastTouchRef.current) {
+      lastTouchRef.current = { x: tt.pageX, y: tt.pageY };
+      return;
+    }
+    const dx = tt.pageX - lastTouchRef.current.x;
+    const dy = tt.pageY - lastTouchRef.current.y;
+    const max = 90;
+    const mag = Math.hypot(dx, dy);
+    const m = Math.min(1, mag / max);
+    if (mag > 0.01) {
+      inputRef.current = {
+        x: (dx / mag) * m,
+        y: (dy / mag) * m,
+      };
+    } else inputRef.current = { x: 0, y: 0 };
+  };
+  const onTouchEnd = () => {
+    inputRef.current = { x: 0, y: 0 };
+    lastTouchRef.current = null;
+  };
+
+  // Static decorative rocks (deterministic per world dimensions)
+  const rocks = useMemo(() => {
+    const arr: { x: number; y: number; r: number }[] = [];
+    let seed = 1337;
+    const rand = () => {
+      seed = (seed * 9301 + 49297) % 233280;
+      return seed / 233280;
+    };
+    for (let i = 0; i < 60; i++) {
+      arr.push({
+        x: rand() * w.width,
+        y: rand() * w.height,
+        r: 18 + rand() * 28,
+      });
+    }
+    return arr;
+  }, [w.width, w.height]);
+
+  const canTribal =
+    w.player.radius >= TRIBAL_RADIUS_THRESHOLD &&
+    w.player.parts.length >= TRIBAL_PARTS_THRESHOLD;
+
+  const goTribal = () => {
+    reportRunEnd(w.player.radius);
+    reportStageReached('tribal');
+    setCarryOver({ parts: [...w.player.parts], radius: w.player.radius });
+    setStage('tribal');
+    try {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {}
+  };
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
-      <Canvas style={{ flex: 1, width, height, backgroundColor: '#0e1733' }}>
-        {/* "stars" / sparse parallax dots */}
-        {decor.stars.map((s, i) => (
-          <Circle
-            key={`s-${i}`}
-            cx={s.x}
-            cy={s.y}
-            r={s.r}
-            color="#3a4d80"
-            opacity={s.o}
-          />
-        ))}
-        {/* hills (just stacked circles for primitive landscape) */}
-        {decor.hills.map((h, i) => (
-          <Circle
-            key={`h-${i}`}
-            cx={h.x}
-            cy={h.y + Math.sin(t * 0.4 + i) * 1.5}
-            r={h.r}
-            color={h.c}
-            opacity={0.95}
-          />
-        ))}
+    <View
+      style={styles.root}
+      onStartShouldSetResponder={() => true}
+      onMoveShouldSetResponder={() => true}
+      onResponderStart={onTouchStart}
+      onResponderMove={onTouchMove}
+      onResponderRelease={onTouchEnd}
+      onResponderTerminate={onTouchEnd}
+    >
+      <Canvas
+        style={{ flex: 1, width, height, backgroundColor: PALETTE.ground }}
+      >
+        {/* Soft darker ground patches for visual texture */}
+        {groundPatches(w.width, w.height, camX, camY, width, height)}
 
-        {/* sea behind ground */}
-        <Circle cx={cx} cy={height * 1.4} r={height * 0.85} color="#0a3a4f" />
+        {/* Decorative rocks (visible ones only) */}
+        {rocks.map((r, i) => {
+          const x = r.x - camX;
+          const y = r.y - camY;
+          if (
+            x < -r.r ||
+            y < -r.r ||
+            x > width + r.r ||
+            y > height + r.r
+          )
+            return null;
+          return (
+            <React.Fragment key={`rock-${i}`}>
+              <Circle cx={x + 3} cy={y + 4} r={r.r} color="#000" opacity={0.25} />
+              <Circle cx={x} cy={y} r={r.r} color={PALETTE.rock} />
+              <Circle cx={x - r.r * 0.3} cy={y - r.r * 0.3} r={r.r * 0.55} color={PALETTE.rockShade} opacity={0.55} />
+            </React.Fragment>
+          );
+        })}
 
-        {/* ground line */}
-        <Circle cx={cx} cy={groundY + 220} r={260} color="#3a2a16" />
-        <Circle cx={cx - 90} cy={groundY + 230} r={250} color="#3a2a16" />
-        <Circle cx={cx + 90} cy={groundY + 230} r={250} color="#3a2a16" />
-
-        {/* creature: a body with legs and an eye, bouncing slightly */}
-        {(() => {
-          const bx = cx;
-          const by = groundY - 6 - Math.abs(Math.sin(t * 2.5)) * 4;
-          const r = 30;
-          const els: React.ReactElement[] = [];
-          // legs
-          for (let i = 0; i < 4; i++) {
-            const off = (i - 1.5) * 18;
-            const phase = t * 6 + i * 1.4;
-            const lift = Math.max(0, Math.sin(phase)) * 6;
-            els.push(
-              <Circle
-                key={`leg-${i}`}
-                cx={bx + off}
-                cy={by + r + 14 - lift}
-                r={6}
-                color="#2c8a76"
-              />,
-            );
-            els.push(
-              <Circle
-                key={`foot-${i}`}
-                cx={bx + off}
-                cy={by + r + 22 - lift}
-                r={5}
-                color="#1f6356"
-              />,
+        {/* Food (plants = grass tufts, meat = fruit) */}
+        {w.food.map((f) => {
+          const x = f.pos.x - camX;
+          const y = f.pos.y - camY;
+          if (x < -20 || y < -20 || x > width + 20 || y > height + 20)
+            return null;
+          if (f.kind === 'plant') {
+            // Tuft of 3 small green dots
+            return (
+              <React.Fragment key={'f' + f.id}>
+                <Circle cx={x - 3} cy={y + 1} r={f.radius * 0.7} color={PALETTE.grass} opacity={0.95} />
+                <Circle cx={x + 3} cy={y + 1} r={f.radius * 0.7} color={PALETTE.grass} opacity={0.95} />
+                <Circle cx={x} cy={y - 2} r={f.radius * 0.85} color="#7be38a" opacity={0.95} />
+              </React.Fragment>
             );
           }
-          // body shadow
-          els.push(
-            <Circle
-              key="bshadow"
-              cx={bx}
-              cy={by + r + 26}
-              r={r * 0.7}
-              color="#000"
-              opacity={0.35}
-            />,
+          // Fruit / berry
+          return (
+            <React.Fragment key={'f' + f.id}>
+              <Circle cx={x} cy={y + 2} r={f.radius * 0.95} color="#000" opacity={0.3} />
+              <Circle cx={x} cy={y} r={f.radius} color={PALETTE.fruit} />
+              <Circle cx={x - f.radius * 0.35} cy={y - f.radius * 0.35} r={f.radius * 0.3} color="#ffb3a3" opacity={0.7} />
+            </React.Fragment>
           );
-          // body
-          els.push(
-            <Circle
-              key="body"
-              cx={bx}
-              cy={by}
-              r={r}
-              color={theme.colors.player}
-            />,
-          );
-          els.push(
-            <Circle
-              key="bellyshade"
-              cx={bx}
-              cy={by + r * 0.2}
-              r={r * 0.85}
-              color="#3da291"
-              opacity={0.55}
-            />,
-          );
-          // head bump
-          els.push(
-            <Circle
-              key="head"
-              cx={bx + 18}
-              cy={by - r * 0.5}
-              r={r * 0.55}
-              color={theme.colors.player}
-            />,
-          );
-          // eye
-          els.push(
-            <Circle
-              key="eye-w"
-              cx={bx + 26}
-              cy={by - r * 0.65}
-              r={6}
-              color="#f0fff8"
-            />,
-          );
-          els.push(
-            <Circle
-              key="eye-p"
-              cx={bx + 28}
-              cy={by - r * 0.6}
-              r={3}
-              color="#0a0410"
-            />,
-          );
-          // tail
-          for (let i = 1; i <= 3; i++) {
-            const wag = Math.sin(t * 4 + i * 0.6) * 4 * i;
-            els.push(
-              <Circle
-                key={`tail-${i}`}
-                cx={bx - r - i * 10}
-                cy={by + i * 2 + wag * 0.3}
-                r={Math.max(3, r * 0.4 - i * 4)}
-                color={theme.colors.player}
-                opacity={0.95 - i * 0.1}
-              />,
-            );
-          }
-          return els;
-        })()}
+        })}
+
+        {/* AI creatures */}
+        {w.cells.map((c) =>
+          renderCreature(c, w.player.radius, camX, camY, width, height, t, false),
+        )}
+
+        {/* Player creature */}
+        {renderCreature(w.player, w.player.radius, camX, camY, width, height, t, true)}
+
+        {/* Particles */}
+        {w.particles.map((p) => (
+          <Circle
+            key={'p' + p.id}
+            cx={p.pos.x - camX}
+            cy={p.pos.y - camY}
+            r={p.radius * (p.life / p.maxLife)}
+            color={p.color}
+            opacity={Math.max(0, p.life / p.maxLife)}
+          />
+        ))}
       </Canvas>
 
-      <View style={styles.overlay} pointerEvents="box-none">
-        <View style={styles.banner}>
-          <Text style={styles.eyebrow}>YENİ EVRE</Text>
-          <Text style={styles.title}>Yaratık Evresi</Text>
-          <Text style={styles.body}>
-            Karaya çıktın. Şimdi sürünerek yiyecek arıyor, daha karmaşık
-            uzuvlar geliştiriyorsun.
-          </Text>
-          <Text style={[styles.body, { color: theme.colors.warning }]}>
-            Bu evrenin oynanışı yapım aşamasında — yakında hareket, çene/pençe
-            takma ve diğer yaratıklarla karşılaşma.
-          </Text>
-          <Text style={styles.stat}>
-            Toplam DNA · <Text style={styles.statV}>{Math.floor(totalDna)}</Text>
-          </Text>
-        </View>
+      <HUD
+        hp={w.player.hp}
+        maxHp={w.player.maxHp}
+        radius={w.player.radius}
+        diet={w.player.diet}
+      />
 
-        <View style={[styles.actions, { paddingBottom: insets.bottom + 18 }]}>
-          <TouchableOpacity
-            onPress={() => {
-              setStage('cell');
-              setStatus('menu');
-            }}
-            style={[styles.btn, styles.btnGhost]}
-          >
-            <Text style={styles.btnGhostTxt}>Ana Menü</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => {
-              setStage('cell');
-              setStatus('playing');
-            }}
-            style={[styles.btn, styles.btnPrimary]}
-          >
-            <Text style={styles.btnPrimaryTxt}>Hücre Evresine Dön</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+      {canTribal ? (
+        <TribalButton bottom={insets.bottom + 24} onPress={goTribal} />
+      ) : (
+        <EvolveButton
+          bottom={insets.bottom + 24}
+          onPress={() => setEvolveOpen(true)}
+        />
+      )}
+
+      <PauseButton
+        top={insets.top + 14}
+        onPress={() => {
+          setStatus('menu');
+          reportRunEnd(w.player.radius);
+        }}
+      />
+
+      <EvolveModal
+        visible={evolveOpen}
+        onClose={() => setEvolveOpen(false)}
+        onApply={(parts) => {
+          applyParts(w.player, parts);
+          setEvolveOpen(false);
+        }}
+        currentParts={w.player.parts}
+      />
     </View>
   );
 }
 
-function makeDecor(width: number, height: number) {
-  const stars: { x: number; y: number; r: number; o: number }[] = [];
-  for (let i = 0; i < 60; i++) {
-    stars.push({
-      x: Math.random() * width,
-      y: Math.random() * height * 0.5,
-      r: Math.random() * 1.4 + 0.6,
-      o: Math.random() * 0.7 + 0.2,
-    });
+function renderCreature(
+  cell: Cell,
+  playerR: number,
+  camX: number,
+  camY: number,
+  vw: number,
+  vh: number,
+  t: number,
+  isPlayer: boolean,
+) {
+  const x = cell.pos.x - camX;
+  const y = cell.pos.y - camY;
+  const r = cell.radius;
+  // Cull off-screen (with margin for legs / tail)
+  const margin = r * 2 + 10;
+  if (x < -margin || y < -margin || x > vw + margin || y > vh + margin)
+    return null;
+
+  const vlen = Math.hypot(cell.vel.x, cell.vel.y);
+  const moving = vlen > 8;
+  const dir =
+    vlen > 5
+      ? { x: cell.vel.x / vlen, y: cell.vel.y / vlen }
+      : { x: 0, y: -1 };
+  // Perpendicular to direction (for legs sticking out sideways)
+  const perp = { x: -dir.y, y: dir.x };
+  const parts = new Set<PartId>(cell.parts);
+
+  // Color: by relative size for AI, fixed for player
+  const baseColor = isPlayer
+    ? PALETTE.creatureBody
+    : cell.radius > playerR * 1.08
+      ? '#d75c5c'
+      : cell.radius < playerR * 0.92
+        ? '#a3d96c'
+        : '#e3c069';
+  const bellyColor = isPlayer
+    ? PALETTE.creatureBelly
+    : 'rgba(0,0,0,0.35)';
+  const legColor = isPlayer ? PALETTE.creatureLeg : darken(baseColor);
+
+  const els: React.ReactElement[] = [];
+  const keyPrefix = (isPlayer ? 'p-' : 'c-' + cell.id + '-') + '';
+
+  // Walk animation phase: 4 legs in two pairs, alternating
+  const walkPhase = moving ? t * 8 : 0;
+
+  // Legs (drawn FIRST so body covers their roots)
+  const legCount = parts.has('jet') ? 6 : 4;
+  for (let i = 0; i < legCount; i++) {
+    // Distribute legs along the body, slightly offset perpendicular
+    const along = ((i + 0.5) / legCount - 0.5) * r * 1.6;
+    // alternate side per pair
+    const side = i % 2 === 0 ? 1 : -1;
+    const lx = x + dir.x * along + perp.x * side * (r * 0.85);
+    const ly = y + dir.y * along + perp.y * side * (r * 0.85);
+    const lift = moving
+      ? Math.max(0, Math.sin(walkPhase + i * 1.3)) * Math.max(2, r * 0.18)
+      : 0;
+    // Foot offset further from body
+    const fx = lx + perp.x * side * (r * 0.5);
+    const fy = ly + perp.y * side * (r * 0.5) - lift;
+    els.push(
+      <Circle
+        key={keyPrefix + 'legseg-' + i}
+        cx={(lx + fx) / 2}
+        cy={(ly + fy) / 2}
+        r={Math.max(2.5, r * 0.16)}
+        color={legColor}
+      />,
+    );
+    els.push(
+      <Circle
+        key={keyPrefix + 'foot-' + i}
+        cx={fx}
+        cy={fy}
+        r={Math.max(3, r * 0.22)}
+        color={legColor}
+      />,
+    );
   }
-  const hills = [
-    { x: width * 0.2, y: height * 0.65, r: 100, c: '#1d2950' },
-    { x: width * 0.55, y: height * 0.62, r: 130, c: '#1f2d57' },
-    { x: width * 0.85, y: height * 0.66, r: 90, c: '#1d2950' },
-  ];
-  return { stars, hills };
+
+  // Tail (behind, segments)
+  const tailSegs = 4;
+  for (let i = 1; i <= tailSegs; i++) {
+    const wag = Math.sin(t * 4 + i * 0.7) * (moving ? 6 : 3);
+    const tx = x - dir.x * (r + i * r * 0.45) + perp.x * wag * 0.18;
+    const ty = y - dir.y * (r + i * r * 0.45) + perp.y * wag * 0.18;
+    els.push(
+      <Circle
+        key={keyPrefix + 'tail-' + i}
+        cx={tx}
+        cy={ty}
+        r={Math.max(2.5, r * 0.45 - i * r * 0.08)}
+        color={baseColor}
+        opacity={0.9 - i * 0.08}
+      />,
+    );
+  }
+
+  // Body shadow on ground
+  els.push(
+    <Circle
+      key={keyPrefix + 'shadow'}
+      cx={x}
+      cy={y + r * 0.7}
+      r={r * 0.95}
+      color="#000"
+      opacity={0.28}
+    />,
+  );
+
+  // Body (main + belly highlight)
+  els.push(
+    <Circle key={keyPrefix + 'body'} cx={x} cy={y} r={r} color={baseColor} />,
+  );
+  els.push(
+    <Circle
+      key={keyPrefix + 'belly'}
+      cx={x}
+      cy={y + r * 0.25}
+      r={r * 0.78}
+      color={bellyColor}
+      opacity={0.7}
+    />,
+  );
+
+  // Shell back armor
+  if (parts.has('shell')) {
+    // a darker oval on top (back)
+    els.push(
+      <Circle
+        key={keyPrefix + 'shell'}
+        cx={x - dir.x * r * 0.1}
+        cy={y - dir.y * r * 0.1 - r * 0.15}
+        r={r * 0.85}
+        color="#1f4e44"
+        opacity={0.85}
+      />,
+    );
+    // shell highlight ridge
+    els.push(
+      <Circle
+        key={keyPrefix + 'shell-h'}
+        cx={x - dir.x * r * 0.2}
+        cy={y - dir.y * r * 0.2 - r * 0.25}
+        r={r * 0.45}
+        color="#3a8a7a"
+        opacity={0.7}
+      />,
+    );
+  }
+
+  // Head: small forward bump
+  const hx = x + dir.x * r * 0.85;
+  const hy = y + dir.y * r * 0.85;
+  els.push(
+    <Circle key={keyPrefix + 'head'} cx={hx} cy={hy} r={r * 0.55} color={baseColor} />,
+  );
+
+  // Eye
+  if (parts.has('eye') || isPlayer) {
+    const ex = hx + dir.x * r * 0.18;
+    const ey = hy + dir.y * r * 0.18;
+    els.push(
+      <Circle key={keyPrefix + 'eye-w'} cx={ex} cy={ey} r={r * 0.22} color="#f0fff8" />,
+    );
+    els.push(
+      <Circle
+        key={keyPrefix + 'eye-p'}
+        cx={ex + dir.x * r * 0.06}
+        cy={ey + dir.y * r * 0.06}
+        r={r * 0.12}
+        color="#0a0410"
+      />,
+    );
+  }
+
+  // Mouth / jaw
+  if (parts.has('jaw')) {
+    const mx = hx + dir.x * r * 0.5;
+    const my = hy + dir.y * r * 0.5;
+    els.push(
+      <Circle
+        key={keyPrefix + 'mouth'}
+        cx={mx}
+        cy={my}
+        r={r * 0.28}
+        color="#170611"
+      />,
+    );
+    // fang
+    els.push(
+      <Circle
+        key={keyPrefix + 'fang'}
+        cx={mx + dir.x * r * 0.18}
+        cy={my + dir.y * r * 0.18}
+        r={r * 0.13}
+        color={theme.colors.danger}
+      />,
+    );
+  }
+
+  // Spike → back ridge spines (3 spines along the back)
+  if (parts.has('spike')) {
+    for (let i = 0; i < 3; i++) {
+      const along = (i - 1) * r * 0.45;
+      const sx = x + dir.x * along;
+      const sy = y + dir.y * along - r * 0.85;
+      els.push(
+        <Circle
+          key={keyPrefix + 'spine-' + i}
+          cx={sx}
+          cy={sy}
+          r={r * 0.18}
+          color={theme.colors.danger}
+        />,
+      );
+    }
+  }
+
+  // Filter → tongue / extra mouth cilia (small dots in front)
+  if (parts.has('filter')) {
+    for (let i = 0; i < 4; i++) {
+      const along = r + (i + 1) * r * 0.18;
+      const ofs = (i % 2 === 0 ? 1 : -1) * r * 0.12;
+      els.push(
+        <Circle
+          key={keyPrefix + 'tongue-' + i}
+          cx={x + dir.x * along + perp.x * ofs}
+          cy={y + dir.y * along + perp.y * ofs}
+          r={r * 0.09}
+          color={PALETTE.fruit}
+          opacity={0.8}
+        />,
+      );
+    }
+  }
+
+  return <React.Fragment key={'creature-' + cell.id}>{els}</React.Fragment>;
+}
+
+function darken(hex: string) {
+  // very rough: mix with #000 at 50%
+  if (!hex.startsWith('#') || hex.length !== 7) return '#222';
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const d = (n: number) => Math.floor(n * 0.55).toString(16).padStart(2, '0');
+  return '#' + d(r) + d(g) + d(b);
+}
+
+function groundPatches(
+  worldW: number,
+  worldH: number,
+  camX: number,
+  camY: number,
+  vw: number,
+  vh: number,
+) {
+  const step = 200;
+  const els: React.ReactElement[] = [];
+  const startX = Math.max(step / 2, Math.floor(camX / step) * step + step / 2);
+  const endX = Math.min(worldW, camX + vw + step);
+  const startY = Math.max(step / 2, Math.floor(camY / step) * step + step / 2);
+  const endY = Math.min(worldH, camY + vh + step);
+  for (let x = startX; x < endX; x += step) {
+    for (let y = startY; y < endY; y += step) {
+      // Pseudo-random hash from coords for shade variation
+      const h = Math.abs(Math.sin(x * 12.9898 + y * 78.233) * 43758.5453);
+      const f = h - Math.floor(h);
+      els.push(
+        <Circle
+          key={`gp-${x}-${y}`}
+          cx={x - camX + (f - 0.5) * 80}
+          cy={y - camY + (f * 7 - 3.5) * 12}
+          r={70 + f * 30}
+          color={f > 0.5 ? '#48351c' : '#2c1f10'}
+          opacity={0.5}
+        />,
+      );
+    }
+  }
+  return els;
+}
+
+function EvolveButton({
+  onPress,
+  bottom,
+}: {
+  onPress: () => void;
+  bottom: number;
+}) {
+  const dna = useGame((s) => s.dna);
+  return (
+    <TouchableOpacity
+      activeOpacity={0.85}
+      onPress={onPress}
+      style={[styles.evolveBtn, { bottom }]}
+    >
+      <Text style={styles.evolveTxt}>EVRİL</Text>
+      <Text style={styles.evolveDna}>{Math.floor(dna)} DNA</Text>
+    </TouchableOpacity>
+  );
+}
+
+function TribalButton({
+  onPress,
+  bottom,
+}: {
+  onPress: () => void;
+  bottom: number;
+}) {
+  return (
+    <TouchableOpacity
+      activeOpacity={0.85}
+      onPress={onPress}
+      style={[styles.tribalBtn, { bottom }]}
+    >
+      <Text style={styles.tribalTxt}>KABİLE KUR</Text>
+      <Text style={styles.tribalSub}>Kabile Evresine geç</Text>
+    </TouchableOpacity>
+  );
+}
+
+function PauseButton({
+  onPress,
+  top,
+}: {
+  onPress: () => void;
+  top: number;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      style={[styles.pauseBtn, { top }]}
+      activeOpacity={0.7}
+    >
+      <Text style={styles.pauseTxt}>×</Text>
+    </TouchableOpacity>
+  );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0e1733' },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'space-between',
-    paddingHorizontal: 22,
+  root: { flex: 1, backgroundColor: PALETTE.ground },
+  evolveBtn: {
+    position: 'absolute',
+    alignSelf: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 26,
+    borderRadius: 30,
+    backgroundColor: theme.colors.bgPanel,
+    borderColor: theme.colors.dna,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    shadowColor: theme.colors.dna,
+    shadowOpacity: 0.5,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 0 },
   },
-  banner: {
-    marginTop: 24,
-    backgroundColor: 'rgba(11,18,38,0.85)',
-    borderRadius: 18,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  eyebrow: {
-    color: theme.colors.accent,
-    fontSize: 11,
+  evolveTxt: {
+    color: theme.colors.dna,
+    fontSize: 16,
     fontWeight: '800',
+    letterSpacing: 2,
+  },
+  evolveDna: {
+    color: theme.colors.text,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  tribalBtn: {
+    position: 'absolute',
+    alignSelf: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 34,
+    borderRadius: 32,
+    backgroundColor: theme.colors.warning,
+    alignItems: 'center',
+    shadowColor: theme.colors.warning,
+    shadowOpacity: 0.7,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  tribalTxt: {
+    color: '#1a0d00',
+    fontSize: 18,
+    fontWeight: '900',
     letterSpacing: 3,
   },
-  title: {
-    color: theme.colors.text,
-    fontSize: 28,
-    fontWeight: '900',
-    marginTop: 4,
+  tribalSub: {
+    color: '#1a0d00',
+    fontSize: 11,
+    opacity: 0.7,
+    marginTop: 2,
   },
-  body: {
-    color: theme.colors.textDim,
-    marginTop: 10,
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  stat: {
-    color: theme.colors.textDim,
-    marginTop: 14,
-    fontSize: 12,
-  },
-  statV: {
-    color: theme.colors.dna,
-    fontWeight: '800',
-  },
-  actions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  btn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 14,
-    alignItems: 'center',
-  },
-  btnGhost: {
-    backgroundColor: 'rgba(11,18,38,0.85)',
+  pauseBtn: {
+    position: 'absolute',
+    right: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.55)',
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  btnPrimary: { backgroundColor: theme.colors.accent },
-  btnGhostTxt: { color: theme.colors.text, fontWeight: '700' },
-  btnPrimaryTxt: {
-    color: theme.colors.bgDeep,
-    fontWeight: '900',
-    letterSpacing: 1,
+  pauseTxt: {
+    color: theme.colors.text,
+    fontSize: 26,
+    lineHeight: 28,
+    marginTop: -2,
   },
 });
