@@ -38,7 +38,7 @@ export default function CellStage() {
   const worldRef = useRef<World>(createWorld());
   const inputRef = useRef({ x: 0, y: 0 });
   const lastTouchRef = useRef<{ x: number; y: number } | null>(null);
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
   const [evolveOpen, setEvolveOpen] = useState(false);
 
   // Game loop
@@ -135,7 +135,7 @@ export default function CellStage() {
       onResponderRelease={onTouchEnd}
       onResponderTerminate={onTouchEnd}
     >
-      <Canvas style={{ width, height, backgroundColor: bg }}>
+      <Canvas style={{ flex: 1, width, height, backgroundColor: bg }}>
         {/* World bounds frame */}
         <Group transform={[{ translateX: -camX }, { translateY: -camY }]}>
           <Rect x={0} y={0} width={w.width} height={w.height}>
@@ -233,6 +233,14 @@ export default function CellStage() {
         </Group>
       </Canvas>
 
+      <View style={styles.debug} pointerEvents="none">
+        <Text style={styles.debugText}>
+          {width}x{height} · f{tick} · cells {w.cells.length} · food{' '}
+          {w.food.length} · p({w.player.pos.x.toFixed(0)},
+          {w.player.pos.y.toFixed(0)}) cam({camX.toFixed(0)},{camY.toFixed(0)})
+        </Text>
+      </View>
+
       <HUD
         hp={w.player.hp}
         maxHp={w.player.maxHp}
@@ -326,6 +334,21 @@ function PauseButton({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.colors.bgDeep },
+  debug: {
+    position: 'absolute',
+    bottom: 90,
+    left: 8,
+    right: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(255,255,0,0.18)',
+    borderRadius: 6,
+  },
+  debugText: {
+    color: theme.colors.warning,
+    fontSize: 10,
+    fontFamily: 'monospace',
+  },
   evolveBtn: {
     position: 'absolute',
     alignSelf: 'center',
