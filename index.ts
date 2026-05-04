@@ -43,7 +43,12 @@ async function bootstrap() {
     (globalThis as any).CanvasKit = ck;
     setStatus('App yükleniyor…');
   }
-  const App = (await import('./App')).default;
+  // require() instead of dynamic import() so Metro keeps App in the main
+  // bundle (static export does not fetch dynamic chunks at runtime). The
+  // module body still evaluates only at this call site, which means Skia's
+  // module init captures the now-set globalThis.CanvasKit.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const App = require('./App').default;
   registerRootComponent(App);
 }
 
