@@ -78,7 +78,7 @@ export function createTribalWorld(): TribalWorld {
     pos: { x: playerHutPos.x + 80, y: playerHutPos.y },
     vel: { x: 0, y: 0 },
     radius: 22,
-    speed: 130,
+    speed: 200,
     hp: 120,
     maxHp: 120,
     damage: 14,
@@ -89,7 +89,7 @@ export function createTribalWorld(): TribalWorld {
   };
 
   const members: Member[] = [player];
-  // 2 player followers
+  // 2 player followers (slightly faster than chief to keep up)
   for (let i = 0; i < 2; i++) {
     members.push({
       id: id(),
@@ -99,7 +99,7 @@ export function createTribalWorld(): TribalWorld {
       },
       vel: { x: 0, y: 0 },
       radius: 18,
-      speed: 110,
+      speed: 220,
       hp: 70,
       maxHp: 70,
       damage: 8,
@@ -309,16 +309,16 @@ export function stepTribalWorld(
         m.ai.mode = 'wander';
       }
     } else {
-      // Wild: wander and attack anything close enough
+      // Wild: wander; only attack if very close (don't constantly aggro chief)
       const enemy = nearestEnemy(m, world);
-      if (enemy && dist(m.pos, enemy.pos) < 180) {
+      if (enemy && dist(m.pos, enemy.pos) < 110) {
         m.ai.mode = 'fight';
         m.ai.target = { ...enemy.pos };
       } else if (m.ai.cooldown <= 0) {
-        m.ai.cooldown = rand(2, 5);
+        m.ai.cooldown = rand(3, 6);
         m.ai.target = {
-          x: m.pos.x + rand(-200, 200),
-          y: m.pos.y + rand(-200, 200),
+          x: m.pos.x + rand(-240, 240),
+          y: m.pos.y + rand(-240, 240),
         };
         m.ai.mode = 'wander';
       }
@@ -356,16 +356,22 @@ export function stepTribalWorld(
       if (!isHostile(a, b, world)) continue;
       const d = dist(a.pos, b.pos);
       if (d < a.radius + b.radius + 4) {
-        // Bump apart
+        // Bump apart with mass-weighted resolution so the larger creature
+        // (especially the player chief) isn't shoved around by tiny attackers.
         const overlap = a.radius + b.radius - d + 2;
         const dir = norm({
           x: (b.pos.x - a.pos.x) || 0.001,
           y: b.pos.y - a.pos.y,
         });
-        a.pos.x -= dir.x * overlap * 0.5;
-        a.pos.y -= dir.y * overlap * 0.5;
-        b.pos.x += dir.x * overlap * 0.5;
-        b.pos.y += dir.y * overlap * 0.5;
+        const ma = a.radius * a.radius;
+        const mb = b.radius * b.radius;
+        const total = ma + mb;
+        const aShare = mb / total; // larger b pushes a less if a is heavier
+        const bShare = ma / total;
+        a.pos.x -= dir.x * overlap * aShare;
+        a.pos.y -= dir.y * overlap * aShare;
+        b.pos.x += dir.x * overlap * bShare;
+        b.pos.y += dir.y * overlap * bShare;
         // Attack on cooldown
         if (a.attackCd <= 0) {
           b.hp -= a.damage;

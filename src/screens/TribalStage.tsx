@@ -53,6 +53,13 @@ export default function TribalStage() {
   const inputRef = useRef({ x: 0, y: 0 });
   const lastTouchRef = useRef<{ x: number; y: number } | null>(null);
   const [tick, setTick] = useState(0);
+  // Drag indicator (origin + current) so user sees where they're "pulling".
+  const [drag, setDrag] = useState<{
+    ox: number;
+    oy: number;
+    cx: number;
+    cy: number;
+  } | null>(null);
 
   // Game loop
   useEffect(() => {
@@ -116,6 +123,7 @@ export default function TribalStage() {
     const tt = e.nativeEvent.touches[0];
     lastTouchRef.current = { x: tt.pageX, y: tt.pageY };
     inputRef.current = { x: 0, y: 0 };
+    setDrag({ ox: tt.pageX, oy: tt.pageY, cx: tt.pageX, cy: tt.pageY });
   };
   const onTouchMove = (e: GestureResponderEvent) => {
     const tt = e.nativeEvent.touches[0];
@@ -125,7 +133,8 @@ export default function TribalStage() {
     }
     const dx = tt.pageX - lastTouchRef.current.x;
     const dy = tt.pageY - lastTouchRef.current.y;
-    const max = 90;
+    // Smaller threshold so a short flick already gives full speed.
+    const max = 55;
     const mag = Math.hypot(dx, dy);
     const m = Math.min(1, mag / max);
     if (mag > 0.01) {
@@ -134,10 +143,16 @@ export default function TribalStage() {
         y: (dy / mag) * m,
       };
     } else inputRef.current = { x: 0, y: 0 };
+    setDrag((prev) =>
+      prev
+        ? { ...prev, cx: tt.pageX, cy: tt.pageY }
+        : { ox: tt.pageX, oy: tt.pageY, cx: tt.pageX, cy: tt.pageY },
+    );
   };
   const onTouchEnd = () => {
     inputRef.current = { x: 0, y: 0 };
     lastTouchRef.current = null;
+    setDrag(null);
   };
 
   // Static decor: rocks
@@ -242,6 +257,46 @@ export default function TribalStage() {
             opacity={Math.max(0, p.life / p.maxLife)}
           />
         ))}
+
+        {/* Drag indicator: origin ring + line + cursor */}
+        {drag ? (
+          <>
+            <Circle cx={drag.ox} cy={drag.oy} r={28} color="#ffffff" opacity={0.12} />
+            <Circle cx={drag.ox} cy={drag.oy} r={18} color="#ffffff" opacity={0.18} />
+            {(() => {
+              const dx = drag.cx - drag.ox;
+              const dy = drag.cy - drag.oy;
+              const mag = Math.hypot(dx, dy);
+              if (mag < 4) return null;
+              const steps = Math.min(8, Math.ceil(mag / 14));
+              const els: React.ReactElement[] = [];
+              for (let i = 1; i <= steps; i++) {
+                const f = i / (steps + 1);
+                els.push(
+                  <Circle
+                    key={`drag-l-${i}`}
+                    cx={drag.ox + dx * f}
+                    cy={drag.oy + dy * f}
+                    r={2}
+                    color="#ffffff"
+                    opacity={0.4}
+                  />,
+                );
+              }
+              els.push(
+                <Circle
+                  key="drag-cur"
+                  cx={drag.cx}
+                  cy={drag.cy}
+                  r={10}
+                  color={theme.colors.accent}
+                  opacity={0.85}
+                />,
+              );
+              return <>{els}</>;
+            })()}
+          </>
+        ) : null}
       </Canvas>
 
       {/* HUD top */}
