@@ -26,6 +26,7 @@ import {
   type SpaceWorld,
   type UFO,
 } from '../game/space-world';
+import MiniMap from '../components/MiniMap';
 
 const FIXED_DT = 1 / 60;
 
@@ -336,6 +337,37 @@ export default function SpaceStage() {
       >
         <Text style={styles.pauseTxt}>×</Text>
       </TouchableOpacity>
+
+      <MiniMap
+        worldWidth={w.width}
+        worldHeight={w.height}
+        cam={{ x: camX, y: camY, w: width, h: height }}
+        player={{ x: w.ufo.pos.x, y: w.ufo.pos.y, color: theme.colors.accent }}
+        dots={[
+          // Planets (big markers, owner-colored)
+          ...w.planets.map((p) => ({
+            x: p.pos.x,
+            y: p.pos.y,
+            color:
+              p.owner === 'player'
+                ? '#6cf0d3'
+                : p.owner === 'rival'
+                  ? '#e3826a'
+                  : '#cccccc',
+            r: p.name === 'Anavatan' || p.name === 'Düşman' ? 5 : 4,
+            opacity: 0.95,
+          })),
+          // Ships
+          ...w.ships.map((s) => ({
+            x: s.pos.x,
+            y: s.pos.y,
+            color: s.faction === 'player' ? '#6cf0d3' : '#e3826a',
+            r: 1.4,
+          })),
+        ]}
+        top={insets.top + 90}
+        right={14}
+      />
 
       {/* Debug */}
       <View style={[styles.debugRow, { top: insets.top + 90 }]} pointerEvents="box-none">

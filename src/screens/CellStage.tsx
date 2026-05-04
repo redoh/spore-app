@@ -18,6 +18,7 @@ import type { Cell, PartId, World } from '../game/types';
 import HUD from '../components/HUD';
 import EvolveModal from '../components/EvolveModal';
 import DebugButton from '../components/DebugButton';
+import MiniMap from '../components/MiniMap';
 
 const FIXED_DT = 1 / 60;
 
@@ -242,6 +243,35 @@ export default function CellStage() {
           setStatus('menu');
           reportRunEnd(w.player.radius);
         }}
+      />
+
+      <MiniMap
+        worldWidth={w.width}
+        worldHeight={w.height}
+        cam={{ x: camX, y: camY, w: width, h: height }}
+        player={{ x: w.player.pos.x, y: w.player.pos.y, color: theme.colors.accent }}
+        dots={[
+          ...w.food.map((f) => ({
+            x: f.pos.x,
+            y: f.pos.y,
+            color:
+              f.kind === 'plant' ? theme.colors.plant : theme.colors.meat,
+            r: 0.9,
+          })),
+          ...w.cells.map((c) => ({
+            x: c.pos.x,
+            y: c.pos.y,
+            color:
+              c.radius > w.player.radius * 1.08
+                ? theme.colors.danger
+                : c.radius < w.player.radius * 0.92
+                  ? theme.colors.plant
+                  : theme.colors.warning,
+            r: 1.6,
+          })),
+        ]}
+        top={insets.top + 64}
+        right={14}
       />
 
       <EvolveModal

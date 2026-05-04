@@ -21,6 +21,7 @@ import {
   type Member,
   type TribalWorld,
 } from '../game/tribal-world';
+import MiniMap from '../components/MiniMap';
 
 const FIXED_DT = 1 / 60;
 const PALETTE = {
@@ -348,6 +349,46 @@ export default function TribalStage() {
       >
         <Text style={styles.pauseTxt}>×</Text>
       </TouchableOpacity>
+
+      <MiniMap
+        worldWidth={w.width}
+        worldHeight={w.height}
+        cam={{ x: camX, y: camY, w: width, h: height }}
+        player={{ x: w.player.pos.x, y: w.player.pos.y, color: theme.colors.accent }}
+        dots={[
+          // Resources first (bottom layer)
+          ...w.resources.map((r) => ({
+            x: r.pos.x,
+            y: r.pos.y,
+            color: r.kind === 'fruit' ? '#e8634a' : '#a73a30',
+            r: 0.8,
+          })),
+          // Huts as bigger markers
+          ...w.huts.map((h) => ({
+            x: h.pos.x,
+            y: h.pos.y,
+            color: h.tribe === 'player' ? '#6cf0d3' : '#e3826a',
+            r: 4,
+            opacity: 0.95,
+          })),
+          // Members
+          ...w.members
+            .filter((m) => m.hp > 0 && m !== w.player)
+            .map((m) => ({
+              x: m.pos.x,
+              y: m.pos.y,
+              color:
+                m.tribe === 'player'
+                  ? '#6cf0d3'
+                  : m.tribe === 'rival'
+                    ? '#e3826a'
+                    : '#b3a370',
+              r: 1.6,
+            })),
+        ]}
+        top={insets.top + 64}
+        right={14}
+      />
 
       {/* Debug shortcuts */}
       <View style={[styles.debugRow, { top: insets.top + 60 }]} pointerEvents="box-none">

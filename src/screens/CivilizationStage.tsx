@@ -27,6 +27,7 @@ import {
   type CivWorld,
   type Soldier,
 } from '../game/civ-world';
+import MiniMap from '../components/MiniMap';
 
 const FIXED_DT = 1 / 60;
 const PALETTE = {
@@ -373,6 +374,37 @@ export default function CivilizationStage() {
       >
         <Text style={styles.pauseTxt}>×</Text>
       </TouchableOpacity>
+
+      <MiniMap
+        worldWidth={w.width}
+        worldHeight={w.height}
+        cam={{ x: camX, y: camY, w: width, h: height }}
+        player={{ x: w.leader.pos.x, y: w.leader.pos.y, color: theme.colors.accent }}
+        dots={[
+          // Cities (big markers)
+          ...w.cities.map((c) => ({
+            x: c.pos.x,
+            y: c.pos.y,
+            color:
+              c.owner === 'player'
+                ? '#6cf0d3'
+                : c.owner === 'rival'
+                  ? '#e3826a'
+                  : '#cccccc',
+            r: c.name === 'Başkent' || c.name === 'Düşman' ? 5 : 4,
+            opacity: 0.95,
+          })),
+          // Soldiers
+          ...w.soldiers.map((s) => ({
+            x: s.pos.x,
+            y: s.pos.y,
+            color: s.faction === 'player' ? '#6cf0d3' : '#e3826a',
+            r: 1.4,
+          })),
+        ]}
+        top={insets.top + 90}
+        right={14}
+      />
 
       {/* Debug shortcuts */}
       <View style={[styles.debugRow, { top: insets.top + 90 }]} pointerEvents="box-none">
