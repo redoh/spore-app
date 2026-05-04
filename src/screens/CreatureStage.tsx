@@ -17,6 +17,7 @@ import { applyParts, createWorld, stepWorld } from '../game/world';
 import type { Cell, PartId, World } from '../game/types';
 import HUD from '../components/HUD';
 import EvolveModal from '../components/EvolveModal';
+import DebugButton from '../components/DebugButton';
 
 const FIXED_DT = 1 / 60;
 
@@ -275,6 +276,14 @@ export default function CreatureStage() {
         maxHp={w.player.maxHp}
         radius={w.player.radius}
         diet={w.player.diet}
+      />
+
+      <DebugButton
+        player={w.player}
+        top={insets.top + 60}
+        growBy={4}
+        dnaPerTap={80}
+        maxRadius={60}
       />
 
       {canTribal ? (
