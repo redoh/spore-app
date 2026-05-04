@@ -11,6 +11,13 @@
     },
     "android": {
       "package": "com.spore.mobile"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "experiments": {
+      "baseUrl": "/spore-app"
     }
   }
 }
