@@ -66,20 +66,27 @@ export default function App() {
   }
 
   return (
-    <GestureHandlerRootView style={styles.root}>
-      <SafeAreaProvider>
-        <View style={styles.root}>
-          {status === 'playing' || status === 'evolving' ? (
-            <CellStage />
-          ) : status === 'gameover' ? (
-            <GameOver />
-          ) : (
-            <MainMenu />
-          )}
-        </View>
-        <StatusBar style="light" />
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+    <View style={styles.root}>
+      <View style={styles.diagBadge} pointerEvents="none">
+        <Text style={styles.diagText}>
+          REACT OK · {Platform.OS} · status:{status}
+        </Text>
+      </View>
+      <GestureHandlerRootView style={styles.root}>
+        <SafeAreaProvider>
+          <View style={styles.root}>
+            {status === 'playing' || status === 'evolving' ? (
+              <CellStage />
+            ) : status === 'gameover' ? (
+              <GameOver />
+            ) : (
+              <MainMenu />
+            )}
+          </View>
+          <StatusBar style="light" />
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    </View>
   );
 }
 
@@ -103,5 +110,22 @@ const styles = StyleSheet.create({
     fontSize: 11,
     paddingHorizontal: 24,
     textAlign: 'center',
+  },
+  diagBadge: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 9999,
+    backgroundColor: '#ff0066',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+  },
+  diagText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1,
   },
 });
