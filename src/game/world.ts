@@ -14,6 +14,16 @@ const WORLD_H = 2400;
 const MAX_FOOD = 60;
 const MAX_CELLS = 14;
 
+export type WorldConfig = {
+  startRadius?: number;
+  startParts?: PartId[];
+  startHp?: number;
+  startSpeed?: number;
+  maxFood?: number;
+  maxCells?: number;
+  plantBias?: number; // 0..1, fraction of food that's plant; rest is meat
+};
+
 let nextId = 1;
 const id = () => nextId++;
 
@@ -30,19 +40,24 @@ const dist = (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.y - b.y);
 const clamp = (v: number, lo: number, hi: number) =>
   v < lo ? lo : v > hi ? hi : v;
 
-export function createWorld(): World {
+export function createWorld(config: WorldConfig = {}): World {
+  const startRadius = config.startRadius ?? 14;
+  const startHp = config.startHp ?? 60;
+  const maxFood = config.maxFood ?? MAX_FOOD;
+  const plantBias = config.plantBias ?? 0.7;
+
   const player: Cell = {
     id: id(),
     pos: { x: WORLD_W / 2, y: WORLD_H / 2 },
     vel: { x: 0, y: 0 },
-    radius: 14,
-    speed: 110,
-    hp: 60,
-    maxHp: 60,
+    radius: startRadius,
+    speed: config.startSpeed ?? 110,
+    hp: startHp,
+    maxHp: startHp,
     hue: 168,
     diet: 'unknown',
     ai: { target: null, cooldown: 0, aggression: 0 },
-    parts: [],
+    parts: config.startParts ? [...config.startParts] : [],
   };
 
   const world: World = {
@@ -57,15 +72,22 @@ export function createWorld(): World {
     spawnTimer: 0,
     foodTimer: 0,
   };
+  // Stash plantBias so spawnFood can use it without changing every call site.
+  (world as unknown as { _plantBias: number })._plantBias = plantBias;
+  (world as unknown as { _maxFood: number })._maxFood = maxFood;
+  (world as unknown as { _maxCells: number })._maxCells =
+    config.maxCells ?? MAX_CELLS;
 
-  for (let i = 0; i < MAX_FOOD * 0.6; i++) world.food.push(spawnFood(world));
+  for (let i = 0; i < maxFood * 0.6; i++) world.food.push(spawnFood(world));
   for (let i = 0; i < 6; i++) world.cells.push(spawnCell(world, player.radius));
 
   return world;
 }
 
 function spawnFood(world: World): Food {
-  const kind = Math.random() < 0.7 ? 'plant' : 'meat';
+  const plantBias =
+    (world as unknown as { _plantBias?: number })._plantBias ?? 0.7;
+  const kind = Math.random() < plantBias ? 'plant' : 'meat';
   return {
     id: id(),
     pos: {
@@ -293,7 +315,7 @@ export function stepWorld(
       world.food.splice(i, 1);
       const dnaGain = (f.kind === 'plant' ? 1 : 2) * eff.eatRate;
       result.dnaGained += dnaGain;
-      player.radius = Math.min(48, player.radius + 0.18);
+      player.radius = Math.min(60, player.radius + 0.18);
       player.hp = Math.min(player.maxHp, player.hp + 2);
       // Track diet
       if (player.diet === 'unknown')
@@ -323,7 +345,7 @@ export function stepWorld(
         // Player eats cell
         const gain = Math.floor(c.radius * 0.7) + 2;
         result.dnaGained += gain;
-        player.radius = Math.min(48, player.radius + c.radius * 0.06);
+        player.radius = Math.min(60, player.radius + c.radius * 0.06);
         player.hp = Math.min(player.maxHp, player.hp + 6);
         spawnParticle(world, c.pos, '#ff8a8a', 12, 90);
         world.cells.splice(i, 1);
@@ -393,13 +415,17 @@ export function stepWorld(
   }
 
   // Spawn timers
+  const maxFood =
+    (world as unknown as { _maxFood?: number })._maxFood ?? MAX_FOOD;
+  const maxCells =
+    (world as unknown as { _maxCells?: number })._maxCells ?? MAX_CELLS;
   world.foodTimer -= dt;
-  if (world.foodTimer <= 0 && world.food.length < MAX_FOOD) {
+  if (world.foodTimer <= 0 && world.food.length < maxFood) {
     world.food.push(spawnFood(world));
     world.foodTimer = rand(0.3, 0.8);
   }
   world.spawnTimer -= dt;
-  if (world.spawnTimer <= 0 && world.cells.length < MAX_CELLS) {
+  if (world.spawnTimer <= 0 && world.cells.length < maxCells) {
     world.cells.push(spawnCell(world, player.radius));
     world.spawnTimer = rand(2.5, 5);
   }
