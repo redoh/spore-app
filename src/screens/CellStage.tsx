@@ -7,7 +7,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { Canvas, Circle } from '@shopify/react-native-skia';
+import { Canvas, Circle, BlurMask, RadialGradient, Rect, vec } from '@shopify/react-native-skia';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
@@ -19,6 +19,8 @@ import HUD from '../components/HUD';
 import EvolveModal from '../components/EvolveModal';
 import DebugButton from '../components/DebugButton';
 import MiniMap from '../components/MiniMap';
+import AmbientParticles from '../components/AmbientParticles';
+import Vignette from '../components/Vignette';
 
 const FIXED_DT = 1 / 60;
 
@@ -41,7 +43,7 @@ export default function CellStage() {
   const worldRef = useRef<World>(createWorld());
   const inputRef = useRef({ x: 0, y: 0 });
   const lastTouchRef = useRef<{ x: number; y: number } | null>(null);
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
   const [evolveOpen, setEvolveOpen] = useState(false);
   const [drag, setDrag] = useState<{
     ox: number;
@@ -93,6 +95,7 @@ export default function CellStage() {
   }, [addDna, reportRunEnd, setStatus, status, evolveOpen]);
 
   const w = worldRef.current;
+  const t = tick / 60;
 
   const camX = Math.max(0, Math.min(w.width - width, w.player.pos.x - width / 2));
   const camY = Math.max(
@@ -162,6 +165,16 @@ export default function CellStage() {
       onResponderTerminate={onTouchEnd}
     >
       <Canvas style={{ flex: 1, width, height, backgroundColor: bg }}>
+        {/* Petri-dish water gradient (screen-space) */}
+        <Rect x={0} y={0} width={width} height={height}>
+          <RadialGradient
+            c={vec(width * 0.5, height * 0.45)}
+            r={Math.max(width, height) * 0.85}
+            colors={['#0d1f3d', '#070d24', '#02050f']}
+            positions={[0, 0.55, 1]}
+          />
+        </Rect>
+
         {gridDots(w.width, w.height, camX, camY, width, height)}
 
         {w.food.map((f) => {
@@ -266,6 +279,21 @@ export default function CellStage() {
         ) : null}
       </Canvas>
 
+      {/* Tiny microbes drifting in the water */}
+      <AmbientParticles
+        width={width}
+        height={height}
+        count={32}
+        speed={8}
+        color="#9ec0ff"
+        size={{ min: 0.5, max: 1.2 }}
+        tick={t}
+        seed={1234}
+      />
+
+      {/* Cinematic vignette */}
+      <Vignette width={width} height={height} color="#000000" intensity={0.6} />
+
       <HUD
         hp={w.player.hp}
         maxHp={w.player.maxHp}
@@ -352,6 +380,19 @@ function renderPlayer(player: Cell, camX: number, camY: number) {
   const parts = new Set<PartId>(player.parts);
   const els: React.ReactElement[] = [];
 
+  // bloom (soft BlurMask glow behind everything)
+  els.push(
+    <Circle
+      key="bloom"
+      cx={px}
+      cy={py}
+      r={pr * 1.7}
+      color={theme.colors.player}
+      opacity={0.45}
+    >
+      <BlurMask blur={20} style="solid" />
+    </Circle>,
+  );
   // outer aura
   els.push(
     <Circle

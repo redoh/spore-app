@@ -7,7 +7,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { Canvas, Circle } from '@shopify/react-native-skia';
+import { Canvas, Circle, BlurMask, RadialGradient, Rect, vec } from '@shopify/react-native-skia';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
@@ -27,6 +27,8 @@ import {
   type UFO,
 } from '../game/space-world';
 import MiniMap from '../components/MiniMap';
+import AmbientParticles from '../components/AmbientParticles';
+import Vignette from '../components/Vignette';
 
 const FIXED_DT = 1 / 60;
 
@@ -192,13 +194,38 @@ export default function SpaceStage() {
       onResponderTerminate={onTouchEnd}
     >
       <Canvas style={{ flex: 1, width, height, backgroundColor: '#02050f' }}>
-        {/* nebulae */}
+        {/* screen-space deep-space gradient */}
+        <Rect x={0} y={0} width={width} height={height}>
+          <RadialGradient
+            c={vec(width * 0.5, height * 0.4)}
+            r={Math.max(width, height) * 0.85}
+            colors={['#0d1f4a', '#040820', '#02050f']}
+            positions={[0, 0.55, 1]}
+          />
+        </Rect>
+
+        {/* nebulae — soft blurred clouds, layered for depth */}
         {nebulae.map((n, i) => {
           const x = n.x - camX;
           const y = n.y - camY;
           if (x < -n.r || y < -n.r || x > width + n.r || y > height + n.r)
             return null;
-          return <Circle key={`neb-${i}`} cx={x} cy={y} r={n.r} color={n.color} opacity={0.18} />;
+          return (
+            <React.Fragment key={`neb-${i}`}>
+              <Circle cx={x} cy={y} r={n.r} color={n.color} opacity={0.22}>
+                <BlurMask blur={40} style="solid" />
+              </Circle>
+              <Circle
+                cx={x + n.r * 0.2}
+                cy={y - n.r * 0.15}
+                r={n.r * 0.55}
+                color={n.color}
+                opacity={0.32}
+              >
+                <BlurMask blur={28} style="solid" />
+              </Circle>
+            </React.Fragment>
+          );
         })}
 
         {/* stars */}
@@ -240,6 +267,28 @@ export default function SpaceStage() {
           />
         ))}
 
+        {/* lens flare around the brightest light source (UFO) */}
+        {(() => {
+          const ufoSx = w.ufo.pos.x - camX;
+          const ufoSy = w.ufo.pos.y - camY;
+          // 5 small flare dots along a diagonal
+          return Array.from({ length: 5 }).map((_, i) => {
+            const f = (i - 2) / 2;
+            return (
+              <Circle
+                key={`flare-${i}`}
+                cx={ufoSx + f * 80}
+                cy={ufoSy + f * 80}
+                r={Math.max(2, 7 - Math.abs(f) * 4)}
+                color={i % 2 === 0 ? '#6cf0d3' : '#ffd47a'}
+                opacity={0.18 - Math.abs(f) * 0.06}
+              >
+                <BlurMask blur={6} style="solid" />
+              </Circle>
+            );
+          });
+        })()}
+
         {/* drag indicator */}
         {drag ? (
           <>
@@ -280,6 +329,9 @@ export default function SpaceStage() {
           </>
         ) : null}
       </Canvas>
+
+      {/* Vignette overlay — deep-space cinematic edge fade */}
+      <Vignette width={width} height={height} color="#000000" intensity={0.65} />
 
       {/* HUD */}
       <View style={[styles.hud, { top: insets.top + 12 }]} pointerEvents="none">
@@ -493,16 +545,18 @@ function renderPlanet(
   const els: React.ReactElement[] = [];
   const k = `pl${p.id}-`;
 
-  // Owner aura
+  // Atmospheric bloom (soft glow ring) — BlurMask for actual blur
   els.push(
     <Circle
-      key={k + 'aura'}
+      key={k + 'bloom'}
       cx={x}
       cy={y}
       r={r + 18}
       color={ownerAuraColor(p.owner)}
-      opacity={0.18}
-    />,
+      opacity={0.45}
+    >
+      <BlurMask blur={26} style="solid" />
+    </Circle>,
   );
 
   // Ring (behind planet for ringed planets)
@@ -522,11 +576,30 @@ function renderPlanet(
     }
   }
 
-  // Planet body
+  // Drop shadow (long, behind body)
   els.push(
-    <Circle key={k + 'shadow'} cx={x + 5} cy={y + 6} r={r} color="#000" opacity={0.5} />,
+    <Circle
+      key={k + 'shadow'}
+      cx={x + r * 0.2}
+      cy={y + r * 0.25}
+      r={r * 1.05}
+      color="#000"
+      opacity={0.55}
+    >
+      <BlurMask blur={10} style="solid" />
+    </Circle>,
   );
-  els.push(<Circle key={k + 'body'} cx={x} cy={y} r={r} color={baseColor} />);
+  // Planet body (radial gradient — lit from upper-left)
+  els.push(
+    <Circle key={k + 'body'} cx={x} cy={y} r={r}>
+      <RadialGradient
+        c={vec(x - r * 0.35, y - r * 0.35)}
+        r={r * 1.4}
+        colors={[lighten(baseColor, 0.35), baseColor, shade(baseColor, -0.55)]}
+        positions={[0, 0.55, 1]}
+      />
+    </Circle>,
+  );
 
   // Surface details (continents / craters)
   for (let i = 0; i < 6; i++) {
@@ -629,16 +702,23 @@ function renderPlanet(
 function renderShip(s: Ship, camX: number, camY: number, vw: number, vh: number) {
   const x = s.pos.x - camX;
   const y = s.pos.y - camY;
-  if (x < -16 || y < -16 || x > vw + 16 || y > vh + 16) return null;
+  if (x < -22 || y < -22 || x > vw + 22 || y > vh + 22) return null;
   const color = s.faction === 'player' ? theme.colors.accent : '#e3826a';
   const vlen = Math.hypot(s.vel.x, s.vel.y);
   const dir =
     vlen > 5 ? { x: s.vel.x / vlen, y: s.vel.y / vlen } : { x: 0, y: -1 };
   return (
     <React.Fragment key={'sh-' + s.id}>
-      {/* engine glow */}
-      <Circle cx={x - dir.x * 9} cy={y - dir.y * 9} r={5} color="#ffae3d" opacity={0.85} />
-      <Circle cx={x - dir.x * 13} cy={y - dir.y * 13} r={3} color="#ffd47a" opacity={0.6} />
+      {/* engine bloom (BlurMask glow) */}
+      <Circle cx={x - dir.x * 11} cy={y - dir.y * 11} r={9} color="#ffae3d" opacity={0.7}>
+        <BlurMask blur={9} style="solid" />
+      </Circle>
+      <Circle cx={x - dir.x * 9} cy={y - dir.y * 9} r={5} color="#ffd47a" opacity={0.95} />
+      <Circle cx={x - dir.x * 14} cy={y - dir.y * 14} r={3} color="#fff8d5" opacity={0.7} />
+      {/* hull halo */}
+      <Circle cx={x} cy={y} r={11} color={color} opacity={0.35}>
+        <BlurMask blur={5} style="solid" />
+      </Circle>
       {/* hull */}
       <Circle cx={x} cy={y} r={7} color={color} />
       <Circle cx={x + dir.x * 4} cy={y + dir.y * 4} r={3} color="#0a0410" />
@@ -652,8 +732,23 @@ function renderUFO(ufo: UFO, camX: number, camY: number, vw: number, vh: number,
   const r = ufo.radius;
   if (x < -r * 2 || y < -r * 2 || x > vw + r * 2 || y > vh + r * 2) return null;
   const els: React.ReactElement[] = [];
-  // glow under
-  els.push(<Circle key="ufo-g" cx={x} cy={y + r * 0.4} r={r * 1.6} color={theme.colors.accent} opacity={0.18} />);
+  // big atmospheric bloom under hull (BlurMask)
+  els.push(
+    <Circle
+      key="ufo-bloom"
+      cx={x}
+      cy={y + r * 0.5}
+      r={r * 2.4}
+      color={theme.colors.accent}
+      opacity={0.55}
+    >
+      <BlurMask blur={32} style="solid" />
+    </Circle>,
+  );
+  // softer wider halo
+  els.push(
+    <Circle key="ufo-g" cx={x} cy={y + r * 0.4} r={r * 1.6} color={theme.colors.accent} opacity={0.22} />,
+  );
   // dome
   els.push(<Circle key="ufo-d" cx={x} cy={y - r * 0.2} r={r * 0.7} color="#9ec0ff" opacity={0.85} />);
   els.push(<Circle key="ufo-d2" cx={x - r * 0.1} cy={y - r * 0.35} r={r * 0.35} color="#ffffff" opacity={0.55} />);
@@ -700,6 +795,10 @@ function ownerTint(owner: 'player' | 'rival' | 'neutral', hue: number): string {
   if (hue < 280) return '#9a5ac0';
   if (hue < 320) return '#c05a9a';
   return '#c45a5a';
+}
+
+function lighten(hex: string, amount: number) {
+  return shade(hex, amount);
 }
 
 function shade(hex: string, amount: number) {

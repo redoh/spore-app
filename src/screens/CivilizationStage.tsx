@@ -7,7 +7,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { Canvas, Circle } from '@shopify/react-native-skia';
+import { Canvas, Circle, BlurMask, RadialGradient, Rect, vec } from '@shopify/react-native-skia';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
@@ -28,6 +28,8 @@ import {
   type Soldier,
 } from '../game/civ-world';
 import MiniMap from '../components/MiniMap';
+import AmbientParticles from '../components/AmbientParticles';
+import Vignette from '../components/Vignette';
 
 const FIXED_DT = 1 / 60;
 const PALETTE = {
@@ -194,6 +196,27 @@ export default function CivilizationStage() {
       onResponderTerminate={onTouchEnd}
     >
       <Canvas style={{ flex: 1, width, height, backgroundColor: PALETTE.ground }}>
+        {/* Lush atmosphere — sky lit gradient */}
+        <Rect x={0} y={0} width={width} height={height}>
+          <RadialGradient
+            c={vec(width * 0.5, -height * 0.1)}
+            r={Math.max(width, height) * 1.3}
+            colors={['#5b9a4f', '#274822', '#16321b']}
+            positions={[0, 0.5, 1]}
+          />
+        </Rect>
+
+        {/* Soft sun glow at top-right */}
+        <Circle
+          cx={width * 0.78}
+          cy={height * 0.08}
+          r={Math.max(80, width * 0.22)}
+          color="#fff8d5"
+          opacity={0.5}
+        >
+          <BlurMask blur={60} style="solid" />
+        </Circle>
+
         {/* ground patches */}
         {patches.map((p, i) => {
           const x = p.x - camX;
@@ -308,6 +331,22 @@ export default function CivilizationStage() {
           </>
         ) : null}
       </Canvas>
+
+      {/* Ambient haze */}
+      <AmbientParticles
+        width={width}
+        height={height}
+        count={22}
+        speed={6}
+        color="#dce6cc"
+        size={{ min: 0.5, max: 1.2 }}
+        tick={t}
+        driftBias={{ x: 0.2, y: -0.1 }}
+        seed={5151}
+      />
+
+      {/* Cinematic vignette */}
+      <Vignette width={width} height={height} color="#0a1410" intensity={0.55} />
 
       {/* Top HUD */}
       <View style={[styles.hud, { top: insets.top + 12 }]} pointerEvents="none">

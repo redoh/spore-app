@@ -7,7 +7,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { Canvas, Circle } from '@shopify/react-native-skia';
+import { Canvas, Circle, BlurMask, RadialGradient, Rect, vec } from '@shopify/react-native-skia';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
@@ -22,6 +22,8 @@ import {
   type TribalWorld,
 } from '../game/tribal-world';
 import MiniMap from '../components/MiniMap';
+import AmbientParticles from '../components/AmbientParticles';
+import Vignette from '../components/Vignette';
 
 const FIXED_DT = 1 / 60;
 const PALETTE = {
@@ -201,6 +203,27 @@ export default function TribalStage() {
       onResponderTerminate={onTouchEnd}
     >
       <Canvas style={{ flex: 1, width, height, backgroundColor: PALETTE.ground }}>
+        {/* Warm dusk lighting (screen-space) */}
+        <Rect x={0} y={0} width={width} height={height}>
+          <RadialGradient
+            c={vec(width * 0.5, -height * 0.2)}
+            r={Math.max(width, height) * 1.4}
+            colors={['#7a4a26', '#3a2a16', '#1c1308']}
+            positions={[0, 0.55, 1]}
+          />
+        </Rect>
+
+        {/* Setting sun glow at top */}
+        <Circle
+          cx={width * 0.5}
+          cy={height * 0.0}
+          r={Math.max(120, width * 0.4)}
+          color="#ff8a3a"
+          opacity={0.4}
+        >
+          <BlurMask blur={80} style="solid" />
+        </Circle>
+
         {groundPatches(w.width, w.height, camX, camY, width, height)}
 
         {/* rocks */}
@@ -299,6 +322,22 @@ export default function TribalStage() {
           </>
         ) : null}
       </Canvas>
+
+      {/* Ash and embers drifting upward (smoke from camp fires) */}
+      <AmbientParticles
+        width={width}
+        height={height}
+        count={26}
+        speed={10}
+        color="#ffae3d"
+        size={{ min: 0.6, max: 1.6 }}
+        tick={t}
+        driftBias={{ x: 0.05, y: -0.6 }}
+        seed={9090}
+      />
+
+      {/* Cinematic vignette */}
+      <Vignette width={width} height={height} color="#1a0d00" intensity={0.55} />
 
       {/* HUD top */}
       <View style={[styles.hud, { top: insets.top + 12 }]} pointerEvents="none">
@@ -709,6 +748,19 @@ function renderHut(
         />,
       );
     }
+    // big soft fire glow via BlurMask
+    els.push(
+      <Circle
+        key={k + 'glow-soft'}
+        cx={fx}
+        cy={fy - 10}
+        r={50}
+        color="#ff8a3a"
+        opacity={0.45}
+      >
+        <BlurMask blur={32} style="solid" />
+      </Circle>,
+    );
     els.push(<Circle key={k + 'glow'} cx={fx} cy={fy - 10} r={36} color="#ff8a3a" opacity={0.16} />);
   }
 

@@ -7,7 +7,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { Canvas, Circle } from '@shopify/react-native-skia';
+import { Canvas, Circle, BlurMask, RadialGradient, Rect, vec } from '@shopify/react-native-skia';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
@@ -19,6 +19,8 @@ import HUD from '../components/HUD';
 import EvolveModal from '../components/EvolveModal';
 import DebugButton from '../components/DebugButton';
 import MiniMap from '../components/MiniMap';
+import AmbientParticles from '../components/AmbientParticles';
+import Vignette from '../components/Vignette';
 
 const FIXED_DT = 1 / 60;
 
@@ -216,6 +218,36 @@ export default function CreatureStage() {
       <Canvas
         style={{ flex: 1, width, height, backgroundColor: PALETTE.ground }}
       >
+        {/* Sky-to-ground gradient (screen-space, simulates lighting from above) */}
+        <Rect x={0} y={0} width={width} height={height}>
+          <RadialGradient
+            c={vec(width * 0.5, -height * 0.3)}
+            r={Math.max(width, height) * 1.4}
+            colors={['#5e7a3e', '#3a2a16', '#241608']}
+            positions={[0, 0.55, 1]}
+          />
+        </Rect>
+
+        {/* Sun glow at top-left of screen (BlurMask) */}
+        <Circle
+          cx={width * 0.18}
+          cy={height * 0.05}
+          r={Math.max(80, width * 0.22)}
+          color="#ffd47a"
+          opacity={0.45}
+        >
+          <BlurMask blur={60} style="solid" />
+        </Circle>
+        <Circle
+          cx={width * 0.18}
+          cy={height * 0.05}
+          r={Math.max(40, width * 0.1)}
+          color="#fff8d5"
+          opacity={0.7}
+        >
+          <BlurMask blur={20} style="solid" />
+        </Circle>
+
         {/* Soft darker ground patches for visual texture */}
         {groundPatches(w.width, w.height, camX, camY, width, height)}
 
@@ -325,6 +357,22 @@ export default function CreatureStage() {
           </>
         ) : null}
       </Canvas>
+
+      {/* Ambient pollen / dust drifting over the world */}
+      <AmbientParticles
+        width={width}
+        height={height}
+        count={28}
+        speed={9}
+        color="#f5e6a8"
+        size={{ min: 0.8, max: 1.8 }}
+        tick={t}
+        driftBias={{ x: 0.15, y: -0.05 }}
+        seed={31337}
+      />
+
+      {/* Cinematic edge fade */}
+      <Vignette width={width} height={height} color="#000000" intensity={0.55} />
 
       <HUD
         hp={w.player.hp}
@@ -499,16 +547,18 @@ function renderCreature(
     );
   }
 
-  // Body shadow on ground
+  // Body shadow on ground (soft via BlurMask)
   els.push(
     <Circle
       key={keyPrefix + 'shadow'}
       cx={x}
       cy={y + r * 0.7}
-      r={r * 0.95}
+      r={r * 1.05}
       color="#000"
-      opacity={0.28}
-    />,
+      opacity={0.4}
+    >
+      <BlurMask blur={8} style="solid" />
+    </Circle>,
   );
 
   // Body (main + belly highlight)
