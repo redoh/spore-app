@@ -18,6 +18,7 @@ export type WorldConfig = {
   startRadius?: number;
   startParts?: PartId[];
   startHp?: number;
+  startSpeed?: number;
   maxFood?: number;
   maxCells?: number;
   plantBias?: number; // 0..1, fraction of food that's plant; rest is meat
@@ -50,7 +51,7 @@ export function createWorld(config: WorldConfig = {}): World {
     pos: { x: WORLD_W / 2, y: WORLD_H / 2 },
     vel: { x: 0, y: 0 },
     radius: startRadius,
-    speed: 110,
+    speed: config.startSpeed ?? 110,
     hp: startHp,
     maxHp: startHp,
     hue: 168,

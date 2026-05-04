@@ -9,6 +9,7 @@ import CellStage from './src/screens/CellStage';
 import CreatureStage from './src/screens/CreatureStage';
 import TribalStage from './src/screens/TribalStage';
 import CivilizationStage from './src/screens/CivilizationStage';
+import SpaceStage from './src/screens/SpaceStage';
 import GameOver from './src/screens/GameOver';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import { useGame } from './src/game/store';
@@ -21,6 +22,7 @@ export default function App() {
   let screen: React.ReactNode;
   if (status === 'gameover') screen = <GameOver />;
   else if (status === 'menu') screen = <MainMenu />;
+  else if (stage === 'space') screen = <SpaceStage />;
   else if (stage === 'civilization') screen = <CivilizationStage />;
   else if (stage === 'tribal') screen = <TribalStage />;
   else if (stage === 'creature') screen = <CreatureStage />;

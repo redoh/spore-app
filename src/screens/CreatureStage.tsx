@@ -57,6 +57,7 @@ export default function CreatureStage() {
     createWorld({
       startRadius: Math.max(20, (carryOver?.radius ?? 22) * 0.85),
       startHp: 90,
+      startSpeed: 200,
       startParts: carryOver?.parts ?? [],
       maxFood: 70,
       maxCells: 18,
@@ -67,6 +68,12 @@ export default function CreatureStage() {
   const lastTouchRef = useRef<{ x: number; y: number } | null>(null);
   const [tick, setTick] = useState(0);
   const [evolveOpen, setEvolveOpen] = useState(false);
+  const [drag, setDrag] = useState<{
+    ox: number;
+    oy: number;
+    cx: number;
+    cy: number;
+  } | null>(null);
 
   // Apply carry-over parts on mount so stats reflect inherited evolution.
   useEffect(() => {
@@ -132,6 +139,7 @@ export default function CreatureStage() {
     const tt = e.nativeEvent.touches[0];
     lastTouchRef.current = { x: tt.pageX, y: tt.pageY };
     inputRef.current = { x: 0, y: 0 };
+    setDrag({ ox: tt.pageX, oy: tt.pageY, cx: tt.pageX, cy: tt.pageY });
   };
   const onTouchMove = (e: GestureResponderEvent) => {
     const tt = e.nativeEvent.touches[0];
@@ -141,7 +149,7 @@ export default function CreatureStage() {
     }
     const dx = tt.pageX - lastTouchRef.current.x;
     const dy = tt.pageY - lastTouchRef.current.y;
-    const max = 90;
+    const max = 55;
     const mag = Math.hypot(dx, dy);
     const m = Math.min(1, mag / max);
     if (mag > 0.01) {
@@ -150,10 +158,16 @@ export default function CreatureStage() {
         y: (dy / mag) * m,
       };
     } else inputRef.current = { x: 0, y: 0 };
+    setDrag((prev) =>
+      prev
+        ? { ...prev, cx: tt.pageX, cy: tt.pageY }
+        : { ox: tt.pageX, oy: tt.pageY, cx: tt.pageX, cy: tt.pageY },
+    );
   };
   const onTouchEnd = () => {
     inputRef.current = { x: 0, y: 0 };
     lastTouchRef.current = null;
+    setDrag(null);
   };
 
   // Static decorative rocks (deterministic per world dimensions)
@@ -269,6 +283,46 @@ export default function CreatureStage() {
             opacity={Math.max(0, p.life / p.maxLife)}
           />
         ))}
+
+        {/* Drag indicator */}
+        {drag ? (
+          <>
+            <Circle cx={drag.ox} cy={drag.oy} r={28} color="#ffffff" opacity={0.12} />
+            <Circle cx={drag.ox} cy={drag.oy} r={18} color="#ffffff" opacity={0.18} />
+            {(() => {
+              const dx = drag.cx - drag.ox;
+              const dy = drag.cy - drag.oy;
+              const mag = Math.hypot(dx, dy);
+              if (mag < 4) return null;
+              const steps = Math.min(8, Math.ceil(mag / 14));
+              const els: React.ReactElement[] = [];
+              for (let i = 1; i <= steps; i++) {
+                const f = i / (steps + 1);
+                els.push(
+                  <Circle
+                    key={`drag-l-${i}`}
+                    cx={drag.ox + dx * f}
+                    cy={drag.oy + dy * f}
+                    r={2}
+                    color="#ffffff"
+                    opacity={0.4}
+                  />,
+                );
+              }
+              els.push(
+                <Circle
+                  key="drag-cur"
+                  cx={drag.cx}
+                  cy={drag.cy}
+                  r={10}
+                  color={theme.colors.accent}
+                  opacity={0.85}
+                />,
+              );
+              return <>{els}</>;
+            })()}
+          </>
+        ) : null}
       </Canvas>
 
       <HUD
