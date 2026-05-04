@@ -43,6 +43,12 @@ export default function CellStage() {
   const lastTouchRef = useRef<{ x: number; y: number } | null>(null);
   const [, setTick] = useState(0);
   const [evolveOpen, setEvolveOpen] = useState(false);
+  const [drag, setDrag] = useState<{
+    ox: number;
+    oy: number;
+    cx: number;
+    cy: number;
+  } | null>(null);
 
   // Game loop
   useEffect(() => {
@@ -98,6 +104,7 @@ export default function CellStage() {
     const t = e.nativeEvent.touches[0];
     lastTouchRef.current = { x: t.pageX, y: t.pageY };
     inputRef.current = { x: 0, y: 0 };
+    setDrag({ ox: t.pageX, oy: t.pageY, cx: t.pageX, cy: t.pageY });
   };
   const onTouchMove = (e: GestureResponderEvent) => {
     const t = e.nativeEvent.touches[0];
@@ -107,7 +114,7 @@ export default function CellStage() {
     }
     const dx = t.pageX - lastTouchRef.current.x;
     const dy = t.pageY - lastTouchRef.current.y;
-    const max = 90;
+    const max = 55;
     const mag = Math.hypot(dx, dy);
     const m = Math.min(1, mag / max);
     if (mag > 0.01) {
@@ -116,10 +123,16 @@ export default function CellStage() {
         y: (dy / mag) * m,
       };
     } else inputRef.current = { x: 0, y: 0 };
+    setDrag((prev) =>
+      prev
+        ? { ...prev, cx: t.pageX, cy: t.pageY }
+        : { ox: t.pageX, oy: t.pageY, cx: t.pageX, cy: t.pageY },
+    );
   };
   const onTouchEnd = () => {
     inputRef.current = { x: 0, y: 0 };
     lastTouchRef.current = null;
+    setDrag(null);
   };
 
   const bg = useMemo(() => theme.colors.bgDeep, []);
@@ -211,6 +224,46 @@ export default function CellStage() {
             opacity={Math.max(0, p.life / p.maxLife)}
           />
         ))}
+
+        {/* Drag indicator: origin ring + dotted path + cursor */}
+        {drag ? (
+          <>
+            <Circle cx={drag.ox} cy={drag.oy} r={28} color="#ffffff" opacity={0.12} />
+            <Circle cx={drag.ox} cy={drag.oy} r={18} color="#ffffff" opacity={0.18} />
+            {(() => {
+              const dx = drag.cx - drag.ox;
+              const dy = drag.cy - drag.oy;
+              const mag = Math.hypot(dx, dy);
+              if (mag < 4) return null;
+              const steps = Math.min(8, Math.ceil(mag / 14));
+              const els: React.ReactElement[] = [];
+              for (let i = 1; i <= steps; i++) {
+                const f = i / (steps + 1);
+                els.push(
+                  <Circle
+                    key={`drag-l-${i}`}
+                    cx={drag.ox + dx * f}
+                    cy={drag.oy + dy * f}
+                    r={2}
+                    color="#ffffff"
+                    opacity={0.4}
+                  />,
+                );
+              }
+              els.push(
+                <Circle
+                  key="drag-cur"
+                  cx={drag.cx}
+                  cy={drag.cy}
+                  r={10}
+                  color={theme.colors.accent}
+                  opacity={0.85}
+                />,
+              );
+              return <>{els}</>;
+            })()}
+          </>
+        ) : null}
       </Canvas>
 
       <HUD
