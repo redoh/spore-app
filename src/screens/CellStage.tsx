@@ -10,7 +10,6 @@ import {
 import {
   Canvas,
   Circle,
-  Group,
   RadialGradient,
   Rect,
   vec,
@@ -136,101 +135,99 @@ export default function CellStage() {
       onResponderTerminate={onTouchEnd}
     >
       <Canvas style={{ flex: 1, width, height, backgroundColor: bg }}>
-        {/* World bounds frame */}
-        <Group transform={[{ translateX: -camX }, { translateY: -camY }]}>
-          <Rect x={0} y={0} width={w.width} height={w.height}>
-            <RadialGradient
-              c={vec(w.width / 2, w.height / 2)}
-              r={Math.max(w.width, w.height) / 1.4}
-              colors={['#0d1736', '#03060f']}
-            />
-          </Rect>
-          {/* Grid dots for parallax feel */}
-          {gridDots(w.width, w.height)}
+        {/* World bounds frame (camera-adjusted) */}
+        <Rect x={-camX} y={-camY} width={w.width} height={w.height}>
+          <RadialGradient
+            c={vec(w.width / 2 - camX, w.height / 2 - camY)}
+            r={Math.max(w.width, w.height) / 1.4}
+            colors={['#0d1736', '#03060f']}
+          />
+        </Rect>
+        {/* Grid dots for parallax feel */}
+        {gridDots(w.width, w.height, camX, camY, width, height)}
 
-          {/* Food */}
-          {w.food.map((f) => (
+        {/* Food (cull off-screen for perf) */}
+        {w.food.map((f) => {
+          const x = f.pos.x - camX;
+          const y = f.pos.y - camY;
+          if (x < -20 || y < -20 || x > width + 20 || y > height + 20) return null;
+          return (
             <Circle
               key={'f' + f.id}
-              cx={f.pos.x}
-              cy={f.pos.y}
+              cx={x}
+              cy={y}
               r={f.radius}
               color={f.kind === 'plant' ? theme.colors.plant : theme.colors.meat}
               opacity={0.95}
             />
-          ))}
+          );
+        })}
 
-          {/* AI cells */}
-          {w.cells.map((c) => {
-            const playerR = w.player.radius;
-            const colorBase =
-              c.radius > playerR * 1.08
-                ? theme.colors.danger
-                : c.radius < playerR * 0.92
-                  ? theme.colors.plant
-                  : theme.colors.warning;
-            return (
-              <Group key={'c' + c.id}>
-                <Circle
-                  cx={c.pos.x}
-                  cy={c.pos.y}
-                  r={c.radius + 3}
-                  color={colorBase}
-                  opacity={0.18}
-                />
-                <Circle
-                  cx={c.pos.x}
-                  cy={c.pos.y}
-                  r={c.radius}
-                  color={colorBase}
-                  opacity={0.85}
-                />
-                <Circle
-                  cx={c.pos.x}
-                  cy={c.pos.y}
-                  r={Math.max(2, c.radius * 0.45)}
-                  color={theme.colors.bgDeep}
-                  opacity={0.5}
-                />
-              </Group>
-            );
-          })}
+        {/* AI cells */}
+        {w.cells.map((c) => {
+          const x = c.pos.x - camX;
+          const y = c.pos.y - camY;
+          if (
+            x < -c.radius - 6 ||
+            y < -c.radius - 6 ||
+            x > width + c.radius + 6 ||
+            y > height + c.radius + 6
+          )
+            return null;
+          const playerR = w.player.radius;
+          const colorBase =
+            c.radius > playerR * 1.08
+              ? theme.colors.danger
+              : c.radius < playerR * 0.92
+                ? theme.colors.plant
+                : theme.colors.warning;
+          return (
+            <React.Fragment key={'c' + c.id}>
+              <Circle cx={x} cy={y} r={c.radius + 3} color={colorBase} opacity={0.18} />
+              <Circle cx={x} cy={y} r={c.radius} color={colorBase} opacity={0.85} />
+              <Circle
+                cx={x}
+                cy={y}
+                r={Math.max(2, c.radius * 0.45)}
+                color={theme.colors.bgDeep}
+                opacity={0.5}
+              />
+            </React.Fragment>
+          );
+        })}
 
-          {/* Player */}
-          <Group>
-            <Circle
-              cx={w.player.pos.x}
-              cy={w.player.pos.y}
-              r={w.player.radius + 6}
-              color={theme.colors.player}
-              opacity={0.2}
-            />
-            <Circle
-              cx={w.player.pos.x}
-              cy={w.player.pos.y}
-              r={w.player.radius}
-              color={theme.colors.player}
-            />
-            <Circle
-              cx={w.player.pos.x}
-              cy={w.player.pos.y}
-              r={Math.max(3, w.player.radius * 0.5)}
-              color={theme.colors.playerInner}
-            />
-          </Group>
+        {/* Player */}
+        <Circle
+          cx={w.player.pos.x - camX}
+          cy={w.player.pos.y - camY}
+          r={w.player.radius + 6}
+          color={theme.colors.player}
+          opacity={0.2}
+        />
+        <Circle
+          cx={w.player.pos.x - camX}
+          cy={w.player.pos.y - camY}
+          r={w.player.radius}
+          color={theme.colors.player}
+        />
+        <Circle
+          cx={w.player.pos.x - camX}
+          cy={w.player.pos.y - camY}
+          r={Math.max(3, w.player.radius * 0.5)}
+          color={theme.colors.playerInner}
+        />
 
-          {/* Particles */}
-          {w.particles.map((p) => (
-            <Circle
-              key={'p' + p.id}
-              cx={p.pos.x}
-              cy={p.pos.y}
-              r={p.radius * (p.life / p.maxLife)}
-              color={p.color}
-              opacity={Math.max(0, p.life / p.maxLife)}
-            />
-          ))}
-        </Group>
+        {/* Particles */}
+        {w.particles.map((p) => (
+          <Circle
+            key={'p' + p.id}
+            cx={p.pos.x - camX}
+            cy={p.pos.y - camY}
+            r={p.radius * (p.life / p.maxLife)}
+            color={p.color}
+            opacity={Math.max(0, p.life / p.maxLife)}
+          />
+        ))}
       </Canvas>
 
       <View style={styles.debug} pointerEvents="none">
@@ -274,16 +271,28 @@ export default function CellStage() {
   );
 }
 
-function gridDots(w: number, h: number) {
+function gridDots(
+  worldW: number,
+  worldH: number,
+  camX: number,
+  camY: number,
+  vw: number,
+  vh: number,
+) {
   const step = 120;
   const dots = [];
-  for (let x = step / 2; x < w; x += step) {
-    for (let y = step / 2; y < h; y += step) {
+  // Only iterate within visible viewport
+  const startX = Math.max(step / 2, Math.floor(camX / step) * step + step / 2);
+  const endX = Math.min(worldW, camX + vw + step);
+  const startY = Math.max(step / 2, Math.floor(camY / step) * step + step / 2);
+  const endY = Math.min(worldH, camY + vh + step);
+  for (let x = startX; x < endX; x += step) {
+    for (let y = startY; y < endY; y += step) {
       dots.push(
         <Circle
           key={`g${x}-${y}`}
-          cx={x}
-          cy={y}
+          cx={x - camX}
+          cy={y - camY}
           r={1.3}
           color="#1d2a52"
           opacity={0.6}
