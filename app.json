@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "Spore",
+    "slug": "spore-app",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.spore.mobile"
+    },
+    "android": {
+      "package": "com.spore.mobile"
+    }
+  }
+}
