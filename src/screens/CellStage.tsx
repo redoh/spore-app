@@ -7,13 +7,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import {
-  Canvas,
-  Circle,
-  RadialGradient,
-  Rect,
-  vec,
-} from '@shopify/react-native-skia';
+import { Canvas, Circle } from '@shopify/react-native-skia';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
@@ -135,14 +129,6 @@ export default function CellStage() {
       onResponderTerminate={onTouchEnd}
     >
       <Canvas style={{ flex: 1, width, height, backgroundColor: bg }}>
-        {/* World bounds frame (camera-adjusted) */}
-        <Rect x={-camX} y={-camY} width={w.width} height={w.height}>
-          <RadialGradient
-            c={vec(w.width / 2 - camX, w.height / 2 - camY)}
-            r={Math.max(w.width, w.height) / 1.4}
-            colors={['#0d1736', '#03060f']}
-          />
-        </Rect>
         {/* Grid dots for parallax feel */}
         {gridDots(w.width, w.height, camX, camY, width, height)}
 
